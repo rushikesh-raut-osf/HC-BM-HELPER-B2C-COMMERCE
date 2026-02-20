@@ -1,0 +1,69 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <title>Agent Helper (MVP)</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .field { margin-top: 12px; }
+        textarea { width: 100%; max-width: 900px; }
+        .error { color: #b00020; margin-top: 16px; }
+        pre { background: #f5f5f5; padding: 10px; overflow: auto; max-width: 900px; }
+        .result { margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <h1>Agent Helper (MVP)</h1>
+
+    <form method="post" action="">
+        <div class="field">
+            <label for="command">Command</label><br/>
+            <textarea id="command" name="command" rows="4" cols="80">${pdict.command}</textarea>
+        </div>
+
+        <div class="field">
+            <label>
+                <input type="checkbox" name="dryRun" value="true" <isif condition="${pdict.dryRun}">checked</isif> />
+                Dry Run
+            </label>
+        </div>
+
+        <div class="field">
+            <label>
+                <input type="checkbox" name="confirm" value="true" <isif condition="${pdict.confirm}">checked</isif> />
+                Confirm Execution (required if Dry Run is off)
+            </label>
+        </div>
+
+        <div class="field">
+            <button type="submit">Run</button>
+        </div>
+    </form>
+
+    <isif condition="${!empty(pdict.error)}">
+        <div class="error">
+            <strong>Error:</strong> ${pdict.error}
+        </div>
+    </isif>
+
+    <isif condition="${!empty(pdict.intent)}">
+        <div class="result">
+            <strong>Intent:</strong> ${pdict.intent}
+        </div>
+    </isif>
+
+    <isif condition="${!empty(pdict.parsedJson)}">
+        <div class="result">
+            <strong>Parsed Params:</strong>
+            <pre>${pdict.parsedJson}</pre>
+        </div>
+    </isif>
+
+    <isif condition="${!empty(pdict.resultJson)}">
+        <div class="result">
+            <strong>Result:</strong>
+            <pre>${pdict.resultJson}</pre>
+        </div>
+    </isif>
+</body>
+</html>

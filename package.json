@@ -1,0 +1,31 @@
+{
+  "name": "bmhelper-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SFCC SFRA-style repo scaffold for app_bmhelper_agent",
+  "scripts": {
+    "build": "webpack --mode production",
+    "watch": "webpack --watch --mode development",
+    "lint:js": "eslint \"cartridges/**/*.js\"",
+    "lint:css": "stylelint \"cartridges/**/*.css\" \"cartridges/**/*.scss\""
+  },
+  "devDependencies": {
+    "@babel/core": "^7.26.0",
+    "@babel/preset-env": "^7.26.0",
+    "autoprefixer": "^10.4.19",
+    "babel-loader": "^9.2.1",
+    "babel-plugin-add-module-exports": "^1.0.4",
+    "css-loader": "^7.1.2",
+    "eslint": "^9.16.0",
+    "mini-css-extract-plugin": "^2.9.1",
+    "postcss": "^8.4.49",
+    "postcss-loader": "^8.1.1",
+    "sass": "^1.80.5",
+    "sass-loader": "^16.0.4",
+    "style-loader": "^4.0.0",
+    "stylelint": "^16.11.0",
+    "terser-webpack-plugin": "^5.3.10",
+    "webpack": "^5.96.1",
+    "webpack-cli": "^5.1.4"
+  }
+}

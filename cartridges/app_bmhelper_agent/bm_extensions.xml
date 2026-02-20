@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="ISO-8859-1" ?>
+<extensions xmlns="http://www.demandware.com/xml/bmmodules/2007-12-11"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.demandware.com/xml/bmmodules/2007-12-11 bmext.xsd">
+
+    <menuitem id="customadminmenuextension_agent" position="99990" site="false">
+        <name xml:lang="x-default">Agent Helper</name>
+        <short_description xml:lang="x-default">Natural language admin actions (MVP).</short_description>
+        <description xml:lang="x-default">Natural language admin actions (MVP).</description>
+        <icon>icons/star_yellow_add.gif</icon>
+    </menuitem>
+
+    <menuaction id="customsubmenu_agent_command" menupath="customadminmenuextension_agent" position="100" site="false">
+        <name xml:lang="x-default">Agent Command</name>
+        <short_description xml:lang="x-default">Run an agent command (Promotions, Price Books, Bulk Updates).</short_description>
+        <description xml:lang="x-default">Run an agent command (Promotions, Price Books, Bulk Updates).</description>
+        <exec pipeline="AgentBM" node="Start" />
+        <sub-pipelines>
+            <pipeline name="AgentBM-Start" />
+        </sub-pipelines>
+        <parameters>
+            <parameter name="ScriptFile" value="bm/AgentBM.js" />
+            <parameter name="Transactional" value="false" />
+        </parameters>
+        <icon>icons/star_yellow_new.gif</icon>
+    </menuaction>
+
+</extensions>
