@@ -1,23 +1,33 @@
-# BM Helper Agent (SFRA-style repo)
+# Discovery & FSD Deviation Agent (Prototype)
 
-This repository contains the SFCC cartridge `app_bmhelper_agent` in an SFRA-style layout.
+This is a lightweight React (Vite) prototype that compares requirements or FSD text against a baseline (SFRA OOTB) and generates a deviation report with estimation signals.
 
-## Quick Start
-1. Install dependencies
-   - `npm install`
-2. Build assets
-   - `npm run build`
-3. Watch assets during development
-   - `npm run watch`
+## Features
+- Baseline vs Current deviation analysis (New / Modified / Removed)
+- Previous vs Current comparison for change tracking
+- Impact rationale + estimation points
+- Auto FSD draft (Markdown)
+- Snapshot history stored in localStorage
+- JSON/Markdown export
 
-## Structure
-- `cartridges/app_bmhelper_agent/` - cartridge source
-- `webpack.config.js` - webpack stub (adjust entries as needed)
-- `package.json` - dev tooling
+## Getting Started
+```bash
+npm install
+npm run dev
+```
 
-## Development Notes
-- Add your client-side JS/CSS entry points and update `webpack.config.js` accordingly.
-- Keep cartridge code inside `cartridges/`.
+## Build
+```bash
+npm run build
+npm run preview
+```
 
-## Collaboration
-- Please read `CONTRIBUTING.md` before opening PRs.
+## Project Structure
+- `index.html` Vite entry
+- `src/main.jsx` React bootstrap
+- `src/App.jsx` UI + logic
+- `src/styles.css` app styles
+
+## Notes
+- This is a prototype; keyword matching and impact scoring are simple by design.
+- Adjust estimation weights in the UI to reflect your team’s sizing model.
