@@ -2,25 +2,18 @@ from __future__ import annotations
 
 from typing import Iterable
 
-import tiktoken
 
-
-def _encoding():
-    return tiktoken.get_encoding("cl100k_base")
-
-
-def chunk_text(text: str, chunk_tokens: int, overlap: int) -> list[str]:
-    encoding = _encoding()
-    tokens = encoding.encode(text)
-    if not tokens:
+def chunk_text(text: str, chunk_words: int, overlap_words: int) -> list[str]:
+    words = text.split()
+    if not words:
         return []
 
     chunks = []
     start = 0
-    step = max(chunk_tokens - overlap, 1)
-    while start < len(tokens):
-        end = min(start + chunk_tokens, len(tokens))
-        chunk = encoding.decode(tokens[start:end]).strip()
+    step = max(chunk_words - overlap_words, 1)
+    while start < len(words):
+        end = min(start + chunk_words, len(words))
+        chunk = " ".join(words[start:end]).strip()
         if chunk:
             chunks.append(chunk)
         start += step

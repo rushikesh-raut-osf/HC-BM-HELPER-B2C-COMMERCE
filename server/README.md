@@ -1,4 +1,4 @@
-# Doc Search Backend (FastAPI)
+# SFRA AI Agent Backend (FastAPI + ChromaDB + Gemini)
 
 ## Setup
 
@@ -10,11 +10,6 @@ pip install -r requirements.txt
 ```
 
 2. Copy `server/.env.example` to `server/.env` and fill in values.
-
-3. Initialize the database:
-```bash
-python scripts/init_db.py
-```
 
 ## Ingest
 
@@ -40,7 +35,13 @@ curl -X POST http://localhost:8000/query \
   -d '{"question": "How do I set up payment methods?", "top_k": 10}'
 ```
 
+## Analyze Example
+```bash
+curl -X POST http://localhost:8000/analyze \
+  -H "Content-Type: application/json" \
+  -d '{"requirements_text": "Checkout must support Apple Pay\nAdd store locator", "top_k": 10}'
+```
+
 ## Notes
-- `documents.embedding` is set to 1536 (default for `text-embedding-3-small`).
-- If you reduce embedding dimensions, update the DB schema accordingly.
+- Chroma persists vectors under `CHROMA_PERSIST_PATH`.
 - Confluence ingest stores last run in `server/.state/confluence_last_run.txt`.

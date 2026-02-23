@@ -4,12 +4,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    openai_api_key: str
-    openai_embedding_model: str = "text-embedding-3-small"
-    openai_embedding_dimensions: int | None = None
-    openai_response_model: str = "gpt-4o-mini"
-
-    database_url: str
+    gemini_api_key: str
+    gemini_embed_model: str = "text-embedding-004"
+    gemini_response_model: str = "gemini-1.5-flash"
 
     confluence_base_url: str
     confluence_email: str
@@ -19,9 +16,10 @@ class Settings(BaseSettings):
 
     sfcc_docs_repo_path: str | None = None
 
-    chunk_tokens: int = 800
-    chunk_overlap: int = 100
+    chunk_words: int = 400
+    chunk_overlap_words: int = 80
     top_k: int = 15
+    chroma_persist_path: str = "./data/chroma"
 
 
 settings = Settings()

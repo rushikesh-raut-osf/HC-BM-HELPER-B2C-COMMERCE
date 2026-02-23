@@ -1,25 +1,14 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.chroma_service import ChromaService
 from app.confluence import fetch_page, page_to_text, search_pages
 from app.config import settings
-from app.db import SessionLocal
-from app.ingest import IngestDocument, hash_text, upsert_document_chunks
-from app.models import Document
+from app.ingest import IngestDocument, upsert_document_chunks
 
 
 STATE_DIR = Path(__file__).resolve().parent.parent / ".state"
 LAST_RUN_FILE = STATE_DIR / "confluence_last_run.txt"
-
-
-def should_skip(db, source_id: str, content_hash_value: str) -> bool:
-    existing = (
-        db.query(Document.content_hash)
-        .filter(Document.source == "confluence", Document.source_id == source_id)
-        .limit(1)
-        .first()
-    )
-    return existing is not None and existing[0] == content_hash_value
 
 
 def main():
@@ -39,24 +28,23 @@ def main():
         print("No Confluence pages found.")
         return
 
-    with SessionLocal() as db:
-        for page_id in page_ids:
-            page = fetch_page(page_id)
-            text = page_to_text(page)
-            content_hash_value = hash_text(text)
-            if should_skip(db, page.page_id, content_hash_value=content_hash_value):
-                continue
-            doc = IngestDocument(
-                source="confluence",
-                source_id=page.page_id,
-                title=page.title,
-                url=page.url,
-                space_key=page.space_key,
-                updated_at=page.updated_at,
-                text=text,
-            )
-            inserted = upsert_document_chunks(db, doc)
-            print(f"Ingested {page.page_id} ({inserted} chunks)")
+    chroma = ChromaService()
+    for page_id in page_ids:
+        page = fetch_page(page_id)
+        text = page_to_text(page)
+        doc = IngestDocument(
+            source="confluence",
+            source_id=page.page_id,
+            title=page.title,
+            url=page.url,
+            space_key=page.space_key,
+            updated_at=page.updated_at,
+            text=text,
+        )
+        if chroma.should_skip("confluence", page.page_id, text):
+            continue
+        inserted = upsert_document_chunks(chroma, doc, task_type="retrieval_document")
+        print(f"Ingested {page.page_id} ({inserted} chunks)")
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     LAST_RUN_FILE.write_text(
