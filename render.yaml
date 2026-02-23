@@ -5,6 +5,24 @@ services:
     rootDir: server
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    disks:
+      - name: chroma-disk
+        mountPath: /data
+        sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
+      - key: CHROMA_PERSIST_PATH
+        value: /data/chroma
+      - key: CORS_ALLOW_ORIGINS
+        value: https://your-vercel-app.vercel.app
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: CONFLUENCE_BASE_URL
+        sync: false
+      - key: CONFLUENCE_EMAIL
+        sync: false
+      - key: CONFLUENCE_API_TOKEN
+        sync: false
+      - key: CONFLUENCE_SPACE_KEYS
+        sync: false

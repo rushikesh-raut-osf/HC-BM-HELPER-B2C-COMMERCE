@@ -48,3 +48,15 @@ export async function generateFsd(results: GapResult[]) {
   }
   return res.json() as Promise<{ fsd: string }>;
 }
+
+export async function generateFsdDocx(results: GapResult[]) {
+  const res = await fetch(`${API_BASE}/generate-fsd-docx`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ gap_results: results }),
+  });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.blob();
+}
