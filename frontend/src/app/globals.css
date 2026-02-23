@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  @apply bg-fog text-ink font-body;
+}
+
+.glass {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35));
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  backdrop-filter: blur(18px);
+}
+
+.section-title {
+  @apply text-sm uppercase tracking-[0.2em] text-night/60;
+}
+
+.card {
+  @apply rounded-3xl border border-black/10 bg-white/80 shadow-sm;
+}
+
+.badge {
+  @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide;
+}
