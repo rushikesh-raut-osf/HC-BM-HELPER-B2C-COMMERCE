@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     chunk_overlap_words: int = 80
     top_k: int = 15
     chroma_persist_path: str = "./data/chroma"
+    cors_allow_origins: str = ""
 
 
 settings = Settings()

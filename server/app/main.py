@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+
+import io
+
+from .confluence import fetch_page, page_to_text, search_pages
+from .ingest import IngestDocument, upsert_document_chunks
 
 from .chroma_service import ChromaService
 from .config import settings
 from .gap_analyzer import analyze_requirement
-from .fsd_generator import generate_fsd
+from .fsd_generator import generate_fsd, generate_fsd_docx
 from .requirement_parser import (
     parse_requirements_from_docx,
     parse_requirements_from_pdf,
@@ -25,6 +32,20 @@ from .schemas import (
 
 app = FastAPI(title="SFRA AI Agent API", version="0.2.0")
 chroma = ChromaService()
+
+origins = [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()]
+allow_credentials = True
+if not origins:
+    origins = ["*"]
+    allow_credentials = False
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=allow_credentials,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -94,3 +115,48 @@ async def analyze_file(file: UploadFile = File(...), top_k: int = Form(None)):
 def generate_fsd_endpoint(payload: GenerateFsdRequest):
     fsd = generate_fsd(payload.gap_results)
     return GenerateFsdResponse(fsd=fsd)
+
+
+@app.post("/generate-fsd-docx")
+def generate_fsd_docx_endpoint(payload: GenerateFsdRequest):
+    fsd = generate_fsd(payload.gap_results)
+    doc = generate_fsd_docx(fsd)
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    headers = {"Content-Disposition": "attachment; filename=fsd.docx"}
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=headers,
+    )
+
+
+@app.post("/ingest-confluence")
+def ingest_confluence():
+    space_keys = [key.strip() for key in settings.confluence_space_keys.split(",") if key.strip()]
+    if not space_keys:
+        raise HTTPException(status_code=400, detail="CONFLUENCE_SPACE_KEYS is not set")
+
+    page_ids = search_pages(space_keys, settings.confluence_cql_extra.strip())
+    if not page_ids:
+        return {"pages": 0, "chunks": 0}
+
+    total_chunks = 0
+    for page_id in page_ids:
+        page = fetch_page(page_id)
+        text = page_to_text(page)
+        if chroma.should_skip("confluence", page.page_id, text):
+            continue
+        doc = IngestDocument(
+            source="confluence",
+            source_id=page.page_id,
+            title=page.title,
+            url=page.url,
+            space_key=page.space_key,
+            updated_at=page.updated_at,
+            text=text,
+        )
+        total_chunks += upsert_document_chunks(chroma, doc, task_type="retrieval_document")
+
+    return {"pages": len(page_ids), "chunks": total_chunks}

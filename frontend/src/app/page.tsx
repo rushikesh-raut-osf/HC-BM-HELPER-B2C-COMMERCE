@@ -2,7 +2,13 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { analyzeRequirementsFile, analyzeRequirementsText, generateFsd, GapResult } from "@/lib/api";
+import {
+  analyzeRequirementsFile,
+  analyzeRequirementsText,
+  generateFsd,
+  generateFsdDocx,
+  GapResult,
+} from "@/lib/api";
 
 const SAMPLE = `Checkout must support Apple Pay and gift messages.
 Add store locator with map view.
@@ -57,6 +63,26 @@ export default function Home() {
     try {
       const payload = await generateFsd(results);
       setFsd(payload.fsd);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDownloadDocx = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const blob = await generateFsdDocx(results);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "fsd.docx";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -228,13 +254,22 @@ export default function Home() {
         <section className="card p-6">
           <div className="flex items-center justify-between">
             <h2 className="font-display text-2xl">FSD Preview</h2>
-            <button
-              onClick={() => navigator.clipboard.writeText(fsd)}
-              disabled={!fsd}
-              className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold"
-            >
-              Copy
-            </button>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => navigator.clipboard.writeText(fsd)}
+                disabled={!fsd}
+                className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold"
+              >
+                Copy
+              </button>
+              <button
+                onClick={handleDownloadDocx}
+                disabled={loading || results.length === 0}
+                className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold"
+              >
+                Download .docx
+              </button>
+            </div>
           </div>
           <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-2xl bg-white/80 p-4 text-sm text-night/80">
             {fsd || "Generate the FSD to view it here."}
