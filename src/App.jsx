@@ -103,6 +103,110 @@ Add store locator with map view.
 Show inventory availability on PDP and cart.
 Allow coupon stacking and promotion rules by customer group.`;
 
+const IMPLEMENTATION_PLAN = {
+  summary:
+    "Build a single ingestion pipeline that normalizes Confluence + SFCC docs into chunks, embeds them with OpenAI embeddings, and stores them in Postgres with pgvector. Provide a query API that embeds a user question, vector-searches top-K chunks, and returns answers with citations.",
+  architecture: [
+    {
+      title: "Ingestion Service (Batch)",
+      items: [
+        "Confluence: CQL search -> page IDs -> content fetch",
+        "SFCC docs: ingest from approved sources (crawl / repo / dump)",
+        "Normalize to text/Markdown",
+        "Chunk + embed",
+        "Upsert to pgvector with metadata"
+      ]
+    },
+    {
+      title: "Query Service (API)",
+      items: [
+        "Embed user question",
+        "Vector search (cosine similarity)",
+        "Return top-K chunks + metadata",
+        "Optional: LLM answer with citations"
+      ]
+    },
+    {
+      title: "Scheduler",
+      items: ["Nightly incremental re-index", "Re-embed changed pages only"]
+    }
+  ],
+  embeddings: [
+    "Default: text-embedding-3-small for cost-efficient search.",
+    "Upgrade: text-embedding-3-large for best-available recall.",
+    "Optional: reduce embedding dimensions if needed."
+  ],
+  schema: `CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE documents (
+  id               bigserial primary key,
+  source           text not null,        -- confluence|sfcc
+  source_id        text not null,        -- pageId or url hash
+  title            text,
+  url              text,
+  space_key        text,
+  updated_at       timestamptz,
+  content_hash     text,                 -- for change detection
+  chunk_index      int not null,
+  chunk_text       text not null,
+  embedding        vector(1536),         -- set to model output dims
+  metadata         jsonb
+);
+
+CREATE UNIQUE INDEX documents_source_id_chunk
+  ON documents (source, source_id, chunk_index);
+
+CREATE INDEX documents_embedding_idx
+  ON documents USING ivfflat (embedding vector_cosine_ops);`,
+  workflows: [
+    {
+      title: "Confluence Ingestion",
+      items: [
+        "CQL search by space + lastmodified > last_run",
+        "Fetch pages with expand=body.storage,version,space",
+        "Convert storage format -> text/Markdown",
+        "Chunk (500-1000 tokens, 100 overlap)",
+        "Embed with text-embedding-3-small",
+        "Upsert; re-embed only if content_hash changes"
+      ]
+    },
+    {
+      title: "SFCC Docs Ingestion",
+      items: [
+        "Fetch from allow-listed sources",
+        "Normalize HTML/PDF -> text",
+        "Chunk, embed, upsert"
+      ]
+    },
+    {
+      title: "Query Flow",
+      items: [
+        "Embed the question",
+        "Vector search top-K (10-30)",
+        "Optional LLM rerank",
+        "Return answer with citations"
+      ]
+    }
+  ],
+  security: [
+    "Confluence API token + space allowlist",
+    "SFCC docs allowlist only",
+    "Store only needed content + metadata",
+    "Respect Confluence permissions (service account with limited access)"
+  ],
+  deployment: [
+    "One batch ingestion container + one API container",
+    "Postgres with pgvector",
+    "Cron/scheduler for nightly re-index"
+  ],
+  openQuestions: [
+    "Confluence base URL (e.g., https://your-domain.atlassian.net/wiki)",
+    "Confluence space keys to index",
+    "SFCC docs source type (public URLs / internal repo / PDF dump)",
+    "Preferred runtime: Python or Node"
+  ]
+};
+
 const normalizeLine = (line) => line.trim().replace(/^[-*.\\d)\\s]+/, "");
 
 const extractEntries = (text) => {
@@ -419,6 +523,74 @@ export default function App() {
           Tip: include lines like “Add store locator with map view” or “Checkout must support Apple
           Pay” to see strong matches.
         </p>
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2>Implementation Plan (Server-Ready)</h2>
+          <div className="panel-subtle">
+            <span className="label">Stack</span>
+            <strong>Confluence + SFCC + OpenAI Embeddings + pgvector</strong>
+          </div>
+        </div>
+        <div className="plan-block">
+          <p className="lede">{IMPLEMENTATION_PLAN.summary}</p>
+
+          <h3>Architecture</h3>
+          {IMPLEMENTATION_PLAN.architecture.map((group) => (
+            <div key={group.title} className="plan-group">
+              <strong>{group.title}</strong>
+              <ul>
+                {group.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          <h3>Embeddings</h3>
+          <ul>
+            {IMPLEMENTATION_PLAN.embeddings.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+
+          <h3>Postgres + pgvector Schema</h3>
+          <pre className="code-block">{IMPLEMENTATION_PLAN.schema}</pre>
+
+          <h3>Workflows</h3>
+          {IMPLEMENTATION_PLAN.workflows.map((group) => (
+            <div key={group.title} className="plan-group">
+              <strong>{group.title}</strong>
+              <ul>
+                {group.items.map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+
+          <h3>Security & Access</h3>
+          <ul>
+            {IMPLEMENTATION_PLAN.security.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+
+          <h3>Deployment</h3>
+          <ul>
+            {IMPLEMENTATION_PLAN.deployment.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+
+          <h3>Needed To Finalize</h3>
+          <ul>
+            {IMPLEMENTATION_PLAN.openQuestions.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
       </section>
 
       <section className="panel">
