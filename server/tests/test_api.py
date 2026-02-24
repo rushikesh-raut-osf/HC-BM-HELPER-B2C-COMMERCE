@@ -30,7 +30,6 @@ def test_analyze_text(monkeypatch):
         return "OOTB Match | 0.9 | Looks good"
 
     monkeypatch.setattr(main.chroma, "query", fake_query)
-    monkeypatch.setattr(main, "generate_fsd", lambda _results: "Overview\n- ok")
     from app import gap_analyzer
 
     monkeypatch.setattr(gap_analyzer, "generate_text", fake_generate_text)
@@ -45,7 +44,19 @@ def test_analyze_text(monkeypatch):
 
 
 def test_generate_fsd_docx(monkeypatch):
-    monkeypatch.setattr(main, "generate_fsd", lambda _results: "Overview\n- ok")
+    monkeypatch.setattr(
+        main,
+        "generate_fsd_json",
+        lambda _results: {
+            "Overview": ["ok"],
+            "OOTB Coverage": [],
+            "Custom Dev": [],
+            "Partial Matches": [],
+            "Assumptions": [],
+            "Open Questions": [],
+            "Effort": [],
+        },
+    )
     client = TestClient(main.app)
     response = client.post("/generate-fsd-docx", json={"gap_results": []})
     assert response.status_code == 200

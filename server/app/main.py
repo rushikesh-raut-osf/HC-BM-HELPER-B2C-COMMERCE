@@ -12,7 +12,11 @@ from .ingest import IngestDocument, upsert_document_chunks
 from .chroma_service import ChromaService
 from .config import settings
 from .gap_analyzer import analyze_requirement
-from .fsd_generator import generate_fsd, generate_fsd_docx
+from .fsd_generator import (
+    generate_fsd_docx,
+    generate_fsd_json,
+    render_fsd_text,
+)
 from .requirement_parser import (
     parse_requirements_from_docx,
     parse_requirements_from_pdf,
@@ -113,14 +117,15 @@ async def analyze_file(file: UploadFile = File(...), top_k: int = Form(None)):
 
 @app.post("/generate-fsd", response_model=GenerateFsdResponse)
 def generate_fsd_endpoint(payload: GenerateFsdRequest):
-    fsd = generate_fsd(payload.gap_results)
-    return GenerateFsdResponse(fsd=fsd)
+    fsd_json = generate_fsd_json(payload.gap_results)
+    fsd_text = render_fsd_text(fsd_json)
+    return GenerateFsdResponse(fsd=fsd_text, fsd_json=fsd_json)
 
 
 @app.post("/generate-fsd-docx")
 def generate_fsd_docx_endpoint(payload: GenerateFsdRequest):
-    fsd = generate_fsd(payload.gap_results)
-    doc = generate_fsd_docx(fsd)
+    fsd_json = generate_fsd_json(payload.gap_results)
+    doc = generate_fsd_docx(fsd_json)
     buffer = io.BytesIO()
     doc.save(buffer)
     buffer.seek(0)

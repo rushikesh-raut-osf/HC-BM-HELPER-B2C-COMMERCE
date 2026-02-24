@@ -26,6 +26,7 @@ class GenerateFsdRequest(BaseModel):
 
 class GenerateFsdResponse(BaseModel):
     fsd: str
+    fsd_json: dict | None = None
 
 
 class QueryRequest(BaseModel):

@@ -11,3 +11,5 @@ python-docx==1.1.2
 pypdf==4.3.1
 tenacity==8.5.0
 pytest==8.3.4
+llama-index-core>=0.10.0,<0.12
+llama-index-readers-file>=0.10.0,<0.12
