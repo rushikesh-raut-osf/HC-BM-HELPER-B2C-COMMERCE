@@ -1,52 +1,81 @@
 from __future__ import annotations
 
+import json
+import logging
+
 from docx import Document
 
+from .fsd_template import FSD_SECTIONS, build_fsd_prompt
 from .gemini_service import generate_text
 
+logger = logging.getLogger(__name__)
 
-FSD_SECTIONS = [
-    "Overview",
-    "OOTB Coverage",
-    "Custom Dev",
-    "Partial Matches",
-    "Assumptions",
-    "Open Questions",
-    "Effort",
-]
+
+def _empty_fsd() -> dict:
+    return {section: [] for section in FSD_SECTIONS}
+
+
+def _parse_fsd_json(text: str) -> dict:
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end <= start:
+        raise ValueError("No JSON object found")
+    payload = json.loads(text[start : end + 1])
+    if not isinstance(payload, dict):
+        raise ValueError("FSD JSON must be an object")
+    for section in FSD_SECTIONS:
+        payload.setdefault(section, [])
+        if not isinstance(payload[section], list):
+            payload[section] = [str(payload[section])]
+        payload[section] = [str(item) for item in payload[section]]
+    return payload
+
+
+def generate_fsd_json(gap_results: list[dict]) -> dict:
+    prompt = build_fsd_prompt(gap_results)
+    response_text = generate_text(prompt)
+    try:
+        return _parse_fsd_json(response_text)
+    except Exception as exc:
+        logger.warning("FSD JSON parse failed: %s", exc)
+        return _empty_fsd()
+
+
+def render_fsd_text(fsd_json: dict) -> str:
+    lines: list[str] = []
+    for section in FSD_SECTIONS:
+        lines.append(section)
+        items = fsd_json.get(section, [])
+        if not items:
+            lines.append("- No items.")
+            continue
+        for item in items:
+            lines.append(f"- {item}")
+    return "\n".join(lines)
 
 
 def generate_fsd(gap_results: list[dict]) -> str:
-    prompt = (
-        "You are generating a Functional Specification Document (FSD) summary.\n"
-        "Use the seven sections: Overview, OOTB Coverage, Custom Dev, Partial Matches, "
-        "Assumptions, Open Questions, Effort.\n"
-        "Provide concise bullet points per section.\n\n"
-        f"Gap Analysis Results:\n{gap_results}\n"
-    )
-    return generate_text(prompt)
+    fsd_json = generate_fsd_json(gap_results)
+    return render_fsd_text(fsd_json)
 
 
-def generate_fsd_docx(fsd_text: str) -> Document:
+def generate_fsd_docx(fsd_json: dict) -> Document:
     doc = Document()
     doc.add_heading("Functional Specification Document", level=1)
-    lines = [line.strip() for line in fsd_text.splitlines() if line.strip()]
-    if not lines:
+    if not fsd_json:
         doc.add_paragraph("No content generated.")
         return doc
 
-    current_section = None
-    for line in lines:
-        normalized = line.rstrip(":")
-        if normalized in FSD_SECTIONS:
-            current_section = normalized
-            doc.add_heading(current_section, level=2)
+    for section in FSD_SECTIONS:
+        doc.add_heading(section, level=2)
+        items = fsd_json.get(section, [])
+        if not items:
+            doc.add_paragraph("No items.")
             continue
-        if line.startswith(("-", "*")):
-            doc.add_paragraph(line.lstrip("-* ").strip(), style="List Bullet")
-        else:
-            if current_section:
-                doc.add_paragraph(line)
-            else:
-                doc.add_paragraph(line)
+        for item in items:
+            doc.add_paragraph(str(item), style="List Bullet")
     return doc
+
+
+def export_fsd_to_docx(fsd_json: dict) -> Document:
+    return generate_fsd_docx(fsd_json)
