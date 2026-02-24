@@ -3,6 +3,7 @@ from __future__ import annotations
 from io import BytesIO
 import os
 import tempfile
+from typing import Optional
 
 from docx import Document
 from pypdf import PdfReader
@@ -13,13 +14,13 @@ def parse_requirements_from_text(text: str) -> list[str]:
     items = [line.lstrip("-*0123456789. ").strip() for line in lines]
     return [item for item in items if len(item) > 3]
 
-def _extract_text_with_llamaindex(data: bytes, suffix: str) -> str | None:
+def _extract_text_with_llamaindex(data: bytes, suffix: str) -> Optional[str]:
     try:
         from llama_index.core import SimpleDirectoryReader
     except Exception:
         return None
 
-    path: str | None = None
+    path: Optional[str] = None
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
             temp_file.write(data)

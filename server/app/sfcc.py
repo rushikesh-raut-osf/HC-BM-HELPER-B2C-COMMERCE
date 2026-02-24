@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+from typing import Optional
 
 from bs4 import BeautifulSoup
 from docx import Document
@@ -13,7 +14,7 @@ from pypdf import PdfReader
 class SfccDoc:
     source_id: str
     title: str
-    url: str | None
+    url: Optional[str]
     text: str
 
 

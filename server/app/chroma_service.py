@@ -46,13 +46,13 @@ class ChromaService:
         return self.collection.query(
             query_embeddings=[query_embedding],
             n_results=top_k,
-            include=["documents", "metadatas", "distances", "ids"],
+            include=["documents", "metadatas", "distances"],
         )
 
     def should_skip(self, source: str, source_id: str, content: str) -> bool:
         content_hash = _content_hash(content)
         results = self.collection.get(
-            where={"source": source, "source_id": source_id},
+            where={"$and": [{"source": source}, {"source_id": source_id}]},
             include=["metadatas"],
         )
         if not results or not results.get("metadatas"):
@@ -63,4 +63,4 @@ class ChromaService:
         return False
 
     def delete_source(self, source: str, source_id: str) -> None:
-        self.collection.delete(where={"source": source, "source_id": source_id})
+        self.collection.delete(where={"$and": [{"source": source}, {"source_id": source_id}]})

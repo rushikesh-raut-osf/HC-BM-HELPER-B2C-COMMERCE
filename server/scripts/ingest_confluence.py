@@ -1,5 +1,8 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from app.chroma_service import ChromaService
 from app.confluence import fetch_page, page_to_text, search_pages

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from typing import Optional
 
 from .chroma_service import ChromaService, ChunkRecord
 from .chunking import chunk_text, dedupe_chunks
@@ -12,10 +13,10 @@ from .config import settings
 class IngestDocument:
     source: str
     source_id: str
-    title: str | None
-    url: str | None
-    space_key: str | None
-    updated_at: object | None
+    title: Optional[str]
+    url: Optional[str]
+    space_key: Optional[str]
+    updated_at: Optional[object]
     text: str
 
 

@@ -1,3 +1,8 @@
+from pathlib import Path
+import sys
+
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from app.chroma_service import ChromaService
 from app.config import settings
 from app.ingest import IngestDocument, upsert_document_chunks

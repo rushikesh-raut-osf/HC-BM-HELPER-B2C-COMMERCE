@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from .chroma_service import ChromaService
 from .gemini_service import generate_text
@@ -32,7 +33,7 @@ def _classify_from_score(score: float) -> str:
     return "Open Question"
 
 
-def _combine_confidence(similarity: float | None, llm_confidence: float | None) -> float:
+def _combine_confidence(similarity: Optional[float], llm_confidence: Optional[float]) -> float:
     if similarity is None and llm_confidence is None:
         return 0.0
     if llm_confidence is None:
@@ -64,7 +65,7 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
     classification = _classify_from_score(top_score)
     similarity_confidence = top_score
     rationale = "Similarity-based classification"
-    llm_confidence: float | None = None
+    llm_confidence: Optional[float] = None
 
     if top_chunks:
         context = "\n\n".join([chunk["text"][:800] for chunk in top_chunks[:3]])

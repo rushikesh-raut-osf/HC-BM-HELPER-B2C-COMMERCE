@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable
+from typing import Iterable, Optional
 
 import html2text
 import httpx
@@ -17,7 +17,7 @@ class ConfluencePage:
     title: str
     url: str
     space_key: str
-    updated_at: datetime | None
+    updated_at: Optional[datetime]
     storage_value: str
 
 
