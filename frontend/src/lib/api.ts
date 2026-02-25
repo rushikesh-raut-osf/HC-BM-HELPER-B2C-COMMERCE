@@ -62,7 +62,12 @@ export async function analyzeRequirementsFile(file: File) {
   if (!res.ok) {
     throw new Error(await res.text());
   }
-  return res.json() as Promise<{ total: number; results: GapResult[] }>;
+  return res.json() as Promise<{
+    total: number;
+    results: GapResult[];
+    baseline?: BaselineSummary | null;
+    baseline_removed?: BaselineRemovedItem[] | null;
+  }>;
 }
 
 export async function saveBaseline(name: string, text: string) {
