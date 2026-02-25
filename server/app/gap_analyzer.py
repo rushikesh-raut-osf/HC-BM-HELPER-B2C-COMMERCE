@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import logging
 from typing import Optional
 
 from .chroma_service import ChromaService
 from .gemini_service import generate_text
 
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class GapResult:
@@ -82,8 +85,14 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
             f"Context:\n{context}\n"
         )
         try:
+            logger.info(
+                "LLM classify start requirement_len=%d context_len=%d",
+                len(requirement),
+                len(context),
+            )
             response_text = generate_text(prompt).strip()
             llm_response = response_text
+            logger.info("LLM classify raw_response=%r", response_text[:500])
             parts = [part.strip() for part in response_text.split("|")]
             if len(parts) >= 2:
                 candidate = parts[0]
@@ -98,8 +107,10 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
                 llm_confidence = float(parts[1])
                 if len(parts) >= 3:
                     rationale = parts[2]
-        except Exception:
-            pass
+            else:
+                logger.warning("LLM classify unparseable_response=%r", response_text[:500])
+        except Exception as exc:
+            logger.exception("LLM classify error: %s", exc)
 
     confidence = _combine_confidence(similarity_confidence, llm_confidence)
 
