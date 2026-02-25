@@ -1,3 +1,5 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700&display=swap");
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -7,23 +9,48 @@
 }
 
 body {
-  @apply bg-fog text-ink font-body;
+  @apply bg-obsidian text-paper font-body;
 }
 
-.glass {
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.35));
-  border: 1px solid rgba(15, 23, 42, 0.12);
-  backdrop-filter: blur(18px);
+.app-shell {
+  background:
+    radial-gradient(circle at 10% 0%, rgba(246, 196, 83, 0.2), transparent 35%),
+    radial-gradient(circle at 90% 10%, rgba(59, 130, 246, 0.18), transparent 45%),
+    linear-gradient(180deg, #0b1220 0%, #101a2b 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.app-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(203, 213, 245, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(203, 213, 245, 0.08) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at top, rgba(0, 0, 0, 0.8), transparent 70%);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-shell > * {
+  position: relative;
+  z-index: 1;
 }
 
 .section-title {
-  @apply text-sm uppercase tracking-[0.2em] text-night/60;
+  @apply text-xs uppercase tracking-[0.32em] text-slate/70;
 }
 
 .card {
-  @apply rounded-3xl border border-black/10 bg-white/80 shadow-sm;
+  @apply rounded-3xl border border-white/10 bg-white/5 shadow-lift backdrop-blur;
+}
+
+.panel {
+  @apply rounded-3xl border border-white/10 bg-paper text-obsidian shadow-lift;
 }
 
 .badge {
-  @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-wide;
+  @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.2em];
 }

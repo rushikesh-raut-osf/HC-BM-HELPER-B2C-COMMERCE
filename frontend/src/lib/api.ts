@@ -10,6 +10,9 @@ export type GapResult = {
     metadata: Record<string, string | number | null>;
     score: number;
   }>;
+  similarity_score?: number | null;
+  llm_confidence?: number | null;
+  llm_response?: string | null;
 };
 
 export async function analyzeRequirementsText(text: string) {

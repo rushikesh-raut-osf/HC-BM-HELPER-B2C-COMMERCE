@@ -5,18 +5,24 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        display: ["\"Space Grotesk\"", "system-ui", "sans-serif"],
-        body: ["\"IBM Plex Sans\"", "system-ui", "sans-serif"],
+        display: ["\"Sora\"", "system-ui", "sans-serif"],
+        body: ["\"Manrope\"", "system-ui", "sans-serif"],
       },
       colors: {
-        ink: "#0b0f14",
-        fog: "#f4f1ec",
-        ember: "#f97316",
-        tide: "#0ea5a4",
-        night: "#111827",
+        obsidian: "#0b1220",
+        midnight: "#101a2b",
+        steel: "#1f2a44",
+        paper: "#f5f4ef",
+        slate: "#cbd5f5",
+        signal: "#3b82f6",
+        gold: "#f6c453",
+        mint: "#14b8a6",
+        amber: "#f59e0b",
+        rose: "#f43f5e",
       },
       boxShadow: {
-        glow: "0 0 30px rgba(249, 115, 22, 0.25)",
+        glow: "0 20px 60px rgba(11, 18, 32, 0.25)",
+        lift: "0 18px 40px rgba(12, 18, 32, 0.18)",
       },
     },
   },

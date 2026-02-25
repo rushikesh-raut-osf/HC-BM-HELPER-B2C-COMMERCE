@@ -22,6 +22,7 @@ export default function Home() {
   const [fsd, setFsd] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showDebug, setShowDebug] = useState(false);
 
   const summary = useMemo(() => {
     const counts = {
@@ -40,6 +41,34 @@ export default function Home() {
     }
     return counts;
   }, [results]);
+
+  const coverage = summary.total
+    ? Math.round(((summary.oob + summary.partial) / summary.total) * 100)
+    : 0;
+
+  const badgeTone = (label: string) => {
+    const normalized = label.toLowerCase();
+    if (normalized.includes("ootb")) return "bg-mint/15 text-mint";
+    if (normalized.includes("partial")) return "bg-amber/20 text-amber";
+    if (normalized.includes("open")) return "bg-rose/20 text-rose";
+    return "bg-signal/20 text-signal";
+  };
+
+  const getSources = (item: GapResult) => {
+    const seen = new Set<string>();
+    const sources: Array<{ title: string; url: string }> = [];
+    for (const chunk of item.top_chunks) {
+      const url = typeof chunk.metadata?.url === "string" ? chunk.metadata.url : "";
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      const title =
+        (typeof chunk.metadata?.title === "string" && chunk.metadata.title) ||
+        (typeof chunk.metadata?.source_id === "string" && chunk.metadata.source_id) ||
+        "Source page";
+      sources.push({ title, url });
+    }
+    return sources;
+  };
 
   const handleAnalyze = async () => {
     setLoading(true);
@@ -91,49 +120,28 @@ export default function Home() {
   };
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top,_#fff,_#f4f1ec_45%,_#e9e2da_100%)] px-6 py-12 text-ink">
+    <main className="app-shell min-h-screen px-6 py-10 text-paper">
       <section className="mx-auto flex max-w-6xl flex-col gap-10">
-        <header className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="space-y-4">
-            <p className="section-title">SFRA AI Agent</p>
+        <header className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl space-y-5">
+            <p className="section-title">Competitive Readiness</p>
             <h1 className="font-display text-4xl leading-tight sm:text-5xl">
-              Requirement gap analysis with FSD generation built for sprint demos.
+              Commerce delivery intelligence for teams who ship ahead of the market.
             </h1>
-            <p className="text-lg text-night/70">
-              Upload a Word/PDF or paste requirements. The agent classifies OOTB coverage, flags
-              custom work, and drafts a structured FSD.
+            <p className="text-lg text-slate/80">
+              Centralize requirements intake, quantify OOTB coverage, and turn decisions into an
+              executive-ready FSD with a single release-ready workflow.
             </p>
             <div className="flex flex-wrap gap-3">
-              <span className="badge bg-ember/15 text-ember">ChromaDB</span>
-              <span className="badge bg-tide/15 text-tide">Gemini 1.5 Flash</span>
-              <span className="badge bg-night/10 text-night">FastAPI</span>
-            </div>
-          </div>
-          <div className="card glass flex flex-col justify-between gap-4 p-6">
-            <div>
-              <p className="section-title">Sprint Milestone</p>
-              <p className="mt-2 text-3xl font-display">Integration Checkpoint</p>
-              <p className="text-night/60">Friday, Feb 27</p>
-            </div>
-            <div className="grid gap-2 text-sm text-night/70">
-              <div className="flex justify-between">
-                <span>Feature Complete</span>
-                <span className="font-semibold">Mar 4</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Code Freeze</span>
-                <span className="font-semibold">Mar 5</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Demo Day</span>
-                <span className="font-semibold">Mar 8</span>
-              </div>
+              <span className="badge bg-white/10 text-slate">ChromaDB Index</span>
+              <span className="badge bg-white/10 text-slate">Gemini 1.5 Flash</span>
+              <span className="badge bg-white/10 text-slate">FastAPI Control Plane</span>
             </div>
           </div>
         </header>
 
         <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="card p-6">
+          <div className="panel p-6">
             <div className="flex items-center justify-between">
               <h2 className="font-display text-2xl">Requirements Intake</h2>
               <button
@@ -141,25 +149,25 @@ export default function Home() {
                   setText(SAMPLE);
                   setFile(null);
                 }}
-                className="rounded-full border border-black/10 px-4 py-2 text-sm"
+                className="rounded-full border border-obsidian/20 px-4 py-2 text-sm font-semibold"
               >
                 Load sample
               </button>
             </div>
-            <div className="mt-4 grid gap-4">
+            <div className="mt-4 grid gap-4 text-obsidian/80">
               <textarea
                 value={text}
                 onChange={(event) => setText(event.target.value)}
-                className="h-44 w-full rounded-2xl border border-black/10 bg-white/70 p-4 text-sm focus:outline-none focus:ring-2 focus:ring-ember/40"
+                className="h-44 w-full rounded-2xl border border-obsidian/15 bg-white p-4 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
                 placeholder="Paste requirements, one per line."
               />
-              <label className="flex items-center gap-3 rounded-2xl border border-dashed border-black/20 bg-white/70 p-4 text-sm">
+              <label className="flex items-center gap-3 rounded-2xl border border-dashed border-obsidian/30 bg-white p-4 text-sm">
                 <input
                   type="file"
                   className="hidden"
                   onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 />
-                <span className="rounded-full bg-night/10 px-3 py-1 text-xs font-semibold uppercase">
+                <span className="rounded-full bg-obsidian/10 px-3 py-1 text-xs font-semibold uppercase">
                   Upload
                 </span>
                 <span>{file ? file.name : "Word or PDF requirements file"}</span>
@@ -167,50 +175,50 @@ export default function Home() {
               <div className="flex flex-wrap gap-3">
                 <button
                   onClick={handleAnalyze}
-                  className="rounded-full bg-ember px-6 py-3 text-sm font-semibold text-white shadow-glow"
+                  className="rounded-full bg-obsidian px-6 py-3 text-sm font-semibold text-paper shadow-glow"
                   disabled={loading}
                 >
                   {loading ? "Analyzing..." : "Run gap analysis"}
                 </button>
                 <button
                   onClick={() => setFile(null)}
-                  className="rounded-full border border-black/10 px-6 py-3 text-sm"
+                  className="rounded-full border border-obsidian/20 px-6 py-3 text-sm"
                 >
                   Clear file
                 </button>
               </div>
-              {error && <p className="text-sm text-red-600">{error}</p>}
+              {error && <p className="text-sm text-rose">{error}</p>}
             </div>
           </div>
 
           <div className="card p-6">
-            <h2 className="font-display text-2xl">Coverage Summary</h2>
+            <h2 className="font-display text-2xl">Coverage Pulse</h2>
             <div className="mt-4 grid gap-3 text-sm">
-              <div className="flex justify-between rounded-2xl bg-white/80 px-4 py-3">
+              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
                 <span>Total Requirements</span>
-                <span className="font-semibold">{summary.total}</span>
+                <span className="font-semibold text-paper">{summary.total}</span>
               </div>
-              <div className="flex justify-between rounded-2xl bg-white/80 px-4 py-3">
+              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
                 <span>OOTB Match</span>
-                <span className="font-semibold">{summary.oob}</span>
+                <span className="font-semibold text-mint">{summary.oob}</span>
               </div>
-              <div className="flex justify-between rounded-2xl bg-white/80 px-4 py-3">
+              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
                 <span>Partial Match</span>
-                <span className="font-semibold">{summary.partial}</span>
+                <span className="font-semibold text-amber">{summary.partial}</span>
               </div>
-              <div className="flex justify-between rounded-2xl bg-white/80 px-4 py-3">
+              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
                 <span>Custom Dev Required</span>
-                <span className="font-semibold">{summary.custom}</span>
+                <span className="font-semibold text-signal">{summary.custom}</span>
               </div>
-              <div className="flex justify-between rounded-2xl bg-white/80 px-4 py-3">
+              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
                 <span>Open Questions</span>
-                <span className="font-semibold">{summary.open}</span>
+                <span className="font-semibold text-rose">{summary.open}</span>
               </div>
             </div>
             <button
               onClick={handleGenerate}
               disabled={loading || results.length === 0}
-              className="mt-6 w-full rounded-full border border-night/20 px-6 py-3 text-sm font-semibold"
+              className="mt-6 w-full rounded-full bg-gold px-6 py-3 text-sm font-semibold text-obsidian"
             >
               {loading ? "Generating..." : "Generate FSD Draft"}
             </button>
@@ -218,60 +226,133 @@ export default function Home() {
         </section>
 
         <section className="card p-6">
-          <h2 className="font-display text-2xl">Gap Analysis Results</h2>
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="font-display text-2xl">Competitive Gap Findings</h2>
+              <p className="text-sm text-slate/70">
+                Prioritized requirements with confidence scoring and source evidence.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-slate/70">
+              <span className="rounded-full border border-white/10 px-3 py-1">Auto-ranked by impact</span>
+              <span className="rounded-full border border-white/10 px-3 py-1">Evidence-linked</span>
+              <button
+                onClick={() => setShowDebug((prev) => !prev)}
+                className="rounded-full border border-white/10 px-3 py-1 text-xs"
+              >
+                {showDebug ? "Hide debug" : "Show debug"}
+              </button>
+            </div>
+          </div>
           <div className="mt-4 grid gap-4">
             {results.length === 0 && (
-              <p className="text-sm text-night/60">Run the analysis to see results.</p>
+              <p className="text-sm text-slate/70">Run the analysis to surface strategic gaps.</p>
             )}
-            {results.map((item, index) => (
-              <div key={`${item.requirement}-${index}`} className="rounded-2xl border border-black/10 bg-white/80 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm font-semibold">{item.requirement}</p>
-                  <span className="badge bg-night/10 text-night">{item.classification}</span>
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-night/70">
-                  <span>Confidence: {(item.confidence * 100).toFixed(0)}%</span>
-                  <span>{item.rationale}</span>
-                </div>
-                {item.top_chunks.length > 0 && (
-                  <details className="mt-3 text-xs text-night/70">
-                    <summary className="cursor-pointer">Top evidence</summary>
-                    <ul className="mt-2 grid gap-2">
-                      {item.top_chunks.slice(0, 3).map((chunk, idx) => (
-                        <li key={`${item.requirement}-chunk-${idx}`} className="rounded-xl border border-black/10 p-3">
-                          <p className="line-clamp-4">{chunk.text}</p>
-                          <p className="mt-2">Score: {(chunk.score * 100).toFixed(0)}%</p>
-                        </li>
+            {results.map((item, index) => {
+              const sources = getSources(item);
+              const similarityPct =
+                item.similarity_score != null ? Math.round(item.similarity_score * 100) : 0;
+
+              return (
+                <div
+                  key={`${item.requirement}-${index}`}
+                  className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <p className="text-sm font-semibold">{item.requirement}</p>
+                    <span className={`badge ${badgeTone(item.classification)}`}>
+                      {item.classification}
+                    </span>
+                  </div>
+                  {sources.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate/70">
+                      <span className="uppercase tracking-[0.2em] text-[0.6rem]">Sources</span>
+                      {sources.map((source) => (
+                        <a
+                          key={source.url}
+                          href={source.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="rounded-full border border-white/10 px-3 py-1 text-slate/80 hover:text-paper"
+                        >
+                          {source.title}
+                        </a>
                       ))}
-                    </ul>
-                  </details>
-                )}
-              </div>
-            ))}
+                    </div>
+                  )}
+                  <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-slate/70">
+                    <span>Confidence: {(item.confidence * 100).toFixed(0)}%</span>
+                    <span>{item.rationale}</span>
+                  </div>
+                  {showDebug && (
+                    <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-slate/70">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <span>Similarity score: {similarityPct}%</span>
+                        <span>
+                          LLM confidence:{" "}
+                          {item.llm_confidence != null
+                            ? `${Math.round(item.llm_confidence * 100)}%`
+                            : "n/a"}
+                        </span>
+                        <span>LLM context: top 3 evidence chunks</span>
+                      </div>
+                      <div className="mt-2 text-[0.7rem] text-slate/60">LLM response</div>
+                      <div className="mt-1 whitespace-pre-wrap text-[0.75rem] text-slate/80">
+                        {item.llm_response || "n/a"}
+                      </div>
+                    </div>
+                  )}
+                  {item.top_chunks.length > 0 && (
+                    <details className="mt-3 text-xs text-slate/70">
+                      <summary className="cursor-pointer">Top evidence</summary>
+                      <ul className="mt-2 grid gap-2">
+                        {item.top_chunks.slice(0, 3).map((chunk, idx) => (
+                          <li
+                            key={`${item.requirement}-chunk-${idx}`}
+                            className="rounded-xl border border-white/10 bg-white/5 p-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-[0.65rem] uppercase tracking-[0.2em] text-slate/60">
+                                Chunk {idx + 1}
+                              </span>
+                              <span className="rounded-full border border-white/10 px-2 py-0.5 text-[0.6rem]">
+                                Used in LLM
+                              </span>
+                            </div>
+                            <p className="mt-2 line-clamp-4">{chunk.text}</p>
+                            <p className="mt-2">Score: {(chunk.score * 100).toFixed(0)}%</p>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </section>
 
-        <section className="card p-6">
+        <section className="panel p-6">
           <div className="flex items-center justify-between">
-            <h2 className="font-display text-2xl">FSD Preview</h2>
+            <h2 className="font-display text-2xl">FSD Executive Preview</h2>
             <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => navigator.clipboard.writeText(fsd)}
                 disabled={!fsd}
-                className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold"
+                className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
               >
                 Copy
               </button>
               <button
                 onClick={handleDownloadDocx}
                 disabled={loading || results.length === 0}
-                className="rounded-full border border-black/10 px-4 py-2 text-xs font-semibold"
+                className="rounded-full bg-obsidian px-4 py-2 text-xs font-semibold text-paper"
               >
                 Download .docx
               </button>
             </div>
           </div>
-          <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-2xl bg-white/80 p-4 text-sm text-night/80">
+          <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-2xl bg-obsidian/5 p-4 text-sm text-obsidian/80">
             {fsd || "Generate the FSD to view it here."}
           </pre>
         </section>

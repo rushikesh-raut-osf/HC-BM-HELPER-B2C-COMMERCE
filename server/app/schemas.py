@@ -15,6 +15,9 @@ class GapResult(BaseModel):
     confidence: float
     rationale: str
     top_chunks: list[dict]
+    similarity_score: Optional[float] = None
+    llm_confidence: Optional[float] = None
+    llm_response: Optional[str] = None
 
 
 class AnalyzeResponse(BaseModel):

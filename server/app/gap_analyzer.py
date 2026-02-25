@@ -14,6 +14,9 @@ class GapResult:
     confidence: float
     top_chunks: list[dict]
     rationale: str
+    similarity_score: float
+    llm_confidence: Optional[float]
+    llm_response: Optional[str]
 
 
 def _score_from_distance(distance: float) -> float:
@@ -67,6 +70,8 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
     rationale = "Similarity-based classification"
     llm_confidence: Optional[float] = None
 
+    llm_response: Optional[str] = None
+
     if top_chunks:
         context = "\n\n".join([chunk["text"][:800] for chunk in top_chunks[:3]])
         prompt = (
@@ -78,6 +83,7 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
         )
         try:
             response_text = generate_text(prompt).strip()
+            llm_response = response_text
             parts = [part.strip() for part in response_text.split("|")]
             if len(parts) >= 2:
                 candidate = parts[0]
@@ -103,4 +109,7 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
         confidence=round(confidence, 3),
         top_chunks=top_chunks,
         rationale=rationale,
+        similarity_score=round(similarity_confidence, 3),
+        llm_confidence=llm_confidence,
+        llm_response=llm_response,
     )
