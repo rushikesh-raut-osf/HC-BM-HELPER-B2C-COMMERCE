@@ -28,10 +28,13 @@ from .schemas import (
     GapResult,
     GenerateFsdRequest,
     GenerateFsdResponse,
+    SaveBaselineRequest,
+    SaveBaselineResponse,
     QueryRequest,
     QueryResponse,
     ChunkResult,
 )
+from .baseline_store import compare_to_baseline, load_baseline, save_baseline
 
 
 app = FastAPI(title="SFRA AI Agent API", version="0.2.0")
@@ -90,7 +93,34 @@ def analyze(payload: AnalyzeRequest):
     for requirement in requirements:
         gap = analyze_requirement(chroma, requirement, top_k)
         results.append(GapResult(**gap.__dict__))
-    return AnalyzeResponse(total=len(results), results=results)
+
+    baseline_summary = None
+    baseline_removed = None
+    if payload.baseline_name:
+        try:
+            baseline = load_baseline(payload.baseline_name)
+        except FileNotFoundError:
+            raise HTTPException(status_code=404, detail="Baseline not found")
+        result_dicts = [r.model_dump() for r in results]
+        comparison = compare_to_baseline(result_dicts, baseline)
+        summary = comparison["summary"]
+        results = [GapResult(**item) for item in result_dicts]
+        baseline_summary = {
+            "name": comparison.get("name") or payload.baseline_name,
+            "created_at": comparison.get("created_at"),
+            "added": summary.get("added", 0),
+            "changed": summary.get("changed", 0),
+            "unchanged": summary.get("unchanged", 0),
+            "removed": summary.get("removed", 0),
+        }
+        baseline_removed = comparison.get("removed")
+
+    return AnalyzeResponse(
+        total=len(results),
+        results=results,
+        baseline=baseline_summary,
+        baseline_removed=baseline_removed,
+    )
 
 
 @app.post("/analyze-file", response_model=AnalyzeResponse)
@@ -113,6 +143,24 @@ async def analyze_file(file: UploadFile = File(...), top_k: int = Form(None)):
         gap = analyze_requirement(chroma, requirement, use_top_k)
         results.append(GapResult(**gap.__dict__))
     return AnalyzeResponse(total=len(results), results=results)
+
+
+@app.post("/save-baseline", response_model=SaveBaselineResponse)
+def save_baseline_endpoint(payload: SaveBaselineRequest):
+    requirements = payload.requirements_list or []
+    if payload.requirements_text:
+        requirements.extend(parse_requirements_from_text(payload.requirements_text))
+    if not requirements:
+        raise HTTPException(status_code=400, detail="requirements_text or requirements_list is required")
+
+    top_k = payload.top_k or settings.top_k
+    results = []
+    for requirement in requirements:
+        gap = analyze_requirement(chroma, requirement, top_k)
+        results.append(GapResult(**gap.__dict__).model_dump())
+
+    saved = save_baseline(payload.baseline_name, requirements, results)
+    return SaveBaselineResponse(name=saved.name, created_at=saved.created_at, total=len(results))
 
 
 @app.post("/generate-fsd", response_model=GenerateFsdResponse)

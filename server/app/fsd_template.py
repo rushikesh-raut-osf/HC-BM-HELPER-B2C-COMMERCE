@@ -4,6 +4,7 @@ import json
 
 FSD_SECTIONS = [
     "Overview",
+    "Deviations",
     "OOTB Coverage",
     "Custom Dev",
     "Partial Matches",

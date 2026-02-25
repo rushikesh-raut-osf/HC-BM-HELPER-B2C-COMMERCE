@@ -13,18 +13,43 @@ export type GapResult = {
   similarity_score?: number | null;
   llm_confidence?: number | null;
   llm_response?: string | null;
+  baseline_status?: string | null;
+  baseline_requirement?: string | null;
+  baseline_classification?: string | null;
+  baseline_confidence?: number | null;
+  baseline_similarity?: number | null;
 };
 
-export async function analyzeRequirementsText(text: string) {
+export type BaselineSummary = {
+  name: string;
+  created_at?: string | null;
+  added: number;
+  changed: number;
+  unchanged: number;
+  removed: number;
+};
+
+export type BaselineRemovedItem = {
+  requirement?: string | null;
+  classification?: string | null;
+  confidence?: number | null;
+};
+
+export async function analyzeRequirementsText(text: string, baselineName?: string) {
   const res = await fetch(`${API_BASE}/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ requirements_text: text }),
+    body: JSON.stringify({ requirements_text: text, baseline_name: baselineName }),
   });
   if (!res.ok) {
     throw new Error(await res.text());
   }
-  return res.json() as Promise<{ total: number; results: GapResult[] }>;
+  return res.json() as Promise<{
+    total: number;
+    results: GapResult[];
+    baseline?: BaselineSummary | null;
+    baseline_removed?: BaselineRemovedItem[] | null;
+  }>;
 }
 
 export async function analyzeRequirementsFile(file: File) {
@@ -38,6 +63,18 @@ export async function analyzeRequirementsFile(file: File) {
     throw new Error(await res.text());
   }
   return res.json() as Promise<{ total: number; results: GapResult[] }>;
+}
+
+export async function saveBaseline(name: string, text: string) {
+  const res = await fetch(`${API_BASE}/save-baseline`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ baseline_name: name, requirements_text: text }),
+  });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<{ name: string; created_at: string; total: number }>;
 }
 
 export async function generateFsd(results: GapResult[]) {

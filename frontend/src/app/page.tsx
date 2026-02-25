@@ -1,13 +1,16 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   analyzeRequirementsFile,
   analyzeRequirementsText,
+  BaselineRemovedItem,
+  BaselineSummary,
   generateFsd,
   generateFsdDocx,
   GapResult,
+  saveBaseline,
 } from "@/lib/api";
 
 const SAMPLE = `Checkout must support Apple Pay and gift messages.
@@ -21,8 +24,46 @@ export default function Home() {
   const [results, setResults] = useState<GapResult[]>([]);
   const [fsd, setFsd] = useState("");
   const [loading, setLoading] = useState(false);
+  const [loadingMode, setLoadingMode] = useState<
+    "analyze" | "generate" | "download" | "baseline" | null
+  >(null);
+  const [loadingMessage, setLoadingMessage] = useState("");
   const [error, setError] = useState("");
   const [showDebug, setShowDebug] = useState(false);
+  const [baselineName, setBaselineName] = useState("");
+  const [baselineSummary, setBaselineSummary] = useState<BaselineSummary | null>(null);
+  const [baselineRemoved, setBaselineRemoved] = useState<BaselineRemovedItem[]>([]);
+  const [baselineNotice, setBaselineNotice] = useState("");
+  const [search, setSearch] = useState("");
+
+  useEffect(() => {
+    if (!loadingMode) {
+      setLoadingMessage("");
+      return;
+    }
+
+    const stepsByMode: Record<NonNullable<typeof loadingMode>, string[]> = {
+      analyze: [
+        "Analyzing requirements",
+        "Fetching evidence sources",
+        "Comparing SFRA coverage",
+        "Scoring confidence signals",
+      ],
+      generate: ["Drafting FSD summary", "Mapping gaps to deliverables", "Formatting exec output"],
+      download: ["Preparing .docx", "Packaging sources", "Finalizing download"],
+      baseline: ["Saving baseline snapshot", "Scoring OOTB coverage", "Indexing baseline state"],
+    };
+
+    const steps = stepsByMode[loadingMode];
+    let idx = 0;
+    setLoadingMessage(steps[idx]);
+    const interval = window.setInterval(() => {
+      idx = (idx + 1) % steps.length;
+      setLoadingMessage(steps[idx]);
+    }, 1400);
+
+    return () => window.clearInterval(interval);
+  }, [loadingMode]);
 
   const summary = useMemo(() => {
     const counts = {
@@ -42,16 +83,20 @@ export default function Home() {
     return counts;
   }, [results]);
 
-  const coverage = summary.total
-    ? Math.round(((summary.oob + summary.partial) / summary.total) * 100)
-    : 0;
-
   const badgeTone = (label: string) => {
     const normalized = label.toLowerCase();
-    if (normalized.includes("ootb")) return "bg-mint/15 text-mint";
-    if (normalized.includes("partial")) return "bg-amber/20 text-amber";
+    if (normalized.includes("ootb")) return "bg-mint/20 text-mint";
+    if (normalized.includes("partial")) return "bg-amber/25 text-amber";
     if (normalized.includes("open")) return "bg-rose/20 text-rose";
     return "bg-signal/20 text-signal";
+  };
+
+  const baselineTone = (label: string) => {
+    const normalized = label.toLowerCase();
+    if (normalized === "unchanged") return "bg-mint/20 text-mint";
+    if (normalized === "changed") return "bg-amber/25 text-amber";
+    if (normalized === "new") return "bg-signal/20 text-signal";
+    return "bg-obsidian/5 text-obsidian/60";
   };
 
   const getSources = (item: GapResult) => {
@@ -72,23 +117,35 @@ export default function Home() {
 
   const handleAnalyze = async () => {
     setLoading(true);
+    setLoadingMode("analyze");
     setError("");
+    setBaselineNotice("");
     try {
       const payload = file
         ? await analyzeRequirementsFile(file)
-        : await analyzeRequirementsText(text);
+        : await analyzeRequirementsText(text, baselineName || undefined);
       setResults(payload.results);
+      if ("baseline" in payload) {
+        setBaselineSummary(payload.baseline ?? null);
+        setBaselineRemoved(payload.baseline_removed ?? []);
+      } else {
+        setBaselineSummary(null);
+        setBaselineRemoved([]);
+      }
       setFsd("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
+      setLoadingMode(null);
     }
   };
 
   const handleGenerate = async () => {
     setLoading(true);
+    setLoadingMode("generate");
     setError("");
+    setBaselineNotice("");
     try {
       const payload = await generateFsd(results);
       setFsd(payload.fsd);
@@ -96,12 +153,15 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
+      setLoadingMode(null);
     }
   };
 
   const handleDownloadDocx = async () => {
     setLoading(true);
+    setLoadingMode("download");
     setError("");
+    setBaselineNotice("");
     try {
       const blob = await generateFsdDocx(results);
       const url = URL.createObjectURL(blob);
@@ -116,245 +176,468 @@ export default function Home() {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
+      setLoadingMode(null);
     }
   };
 
+  const handleSaveBaseline = async () => {
+    if (!baselineName.trim()) {
+      setBaselineNotice("Add a baseline name before saving.");
+      return;
+    }
+    setLoading(true);
+    setLoadingMode("baseline");
+    setError("");
+    try {
+      const saved = await saveBaseline(baselineName.trim(), text);
+      setBaselineNotice(`Baseline "${saved.name}" saved with ${saved.total} requirements.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+      setLoadingMode(null);
+    }
+  };
+
+  const filteredResults = results.filter((item) =>
+    item.requirement.toLowerCase().includes(search.toLowerCase())
+  );
+
   return (
-    <main className="app-shell min-h-screen px-6 py-10 text-paper">
-      <section className="mx-auto flex max-w-6xl flex-col gap-10">
-        <header className="flex flex-col gap-8 lg:flex-row lg:items-center lg:justify-between">
-          <div className="max-w-2xl space-y-5">
-            <p className="section-title">Competitive Readiness</p>
-            <h1 className="font-display text-4xl leading-tight sm:text-5xl">
-              Commerce delivery intelligence for teams who ship ahead of the market.
-            </h1>
-            <p className="text-lg text-slate/80">
-              Centralize requirements intake, quantify OOTB coverage, and turn decisions into an
-              executive-ready FSD with a single release-ready workflow.
-            </p>
-            <div className="flex flex-wrap gap-3">
-              <span className="badge bg-white/10 text-slate">ChromaDB Index</span>
-              <span className="badge bg-white/10 text-slate">Gemini 1.5 Flash</span>
-              <span className="badge bg-white/10 text-slate">FastAPI Control Plane</span>
+    <main className="app-shell min-h-screen px-4 py-8 text-obsidian sm:px-6">
+      <section className="mx-auto flex max-w-7xl flex-col gap-6">
+        <header className="glass-bar">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-signal to-mint" />
+            <div>
+              <p className="text-sm font-semibold text-obsidian/70">SFRA AI Agent</p>
+              <p className="text-lg font-semibold">Requirements Intelligence</p>
             </div>
+          </div>
+          <nav className="hidden items-center gap-6 text-sm font-semibold text-obsidian/60 lg:flex">
+            <button className="nav-pill">Upload</button>
+            <button className="nav-pill nav-pill--active">Analysis</button>
+            <button className="nav-pill">FSD Preview</button>
+            <button className="nav-pill">Export</button>
+          </nav>
+          <div className="flex items-center gap-2">
+            <button className="icon-chip">?</button>
+            <button className="icon-chip">?</button>
+            <div className="h-9 w-9 rounded-full bg-obsidian/10" />
           </div>
         </header>
 
-        <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
-          <div className="panel p-6">
-            <div className="flex items-center justify-between">
-              <h2 className="font-display text-2xl">Requirements Intake</h2>
-              <button
-                onClick={() => {
-                  setText(SAMPLE);
-                  setFile(null);
-                }}
-                className="rounded-full border border-obsidian/20 px-4 py-2 text-sm font-semibold"
-              >
-                Load sample
-              </button>
-            </div>
-            <div className="mt-4 grid gap-4 text-obsidian/80">
-              <textarea
-                value={text}
-                onChange={(event) => setText(event.target.value)}
-                className="h-44 w-full rounded-2xl border border-obsidian/15 bg-white p-4 text-sm focus:outline-none focus:ring-2 focus:ring-gold/40"
-                placeholder="Paste requirements, one per line."
-              />
-              <label className="flex items-center gap-3 rounded-2xl border border-dashed border-obsidian/30 bg-white p-4 text-sm">
-                <input
-                  type="file"
-                  className="hidden"
-                  onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-                />
-                <span className="rounded-full bg-obsidian/10 px-3 py-1 text-xs font-semibold uppercase">
-                  Upload
-                </span>
-                <span>{file ? file.name : "Word or PDF requirements file"}</span>
-              </label>
-              <div className="flex flex-wrap gap-3">
+        <section className="grid gap-6 lg:grid-cols-[1.05fr_1.4fr]">
+          <div className="grid gap-6">
+            <div className="card p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="section-title">Upload Requirement Documents</p>
+                  <h2 className="font-display text-2xl">Drop your Word or PDF files here</h2>
+                </div>
                 <button
-                  onClick={handleAnalyze}
-                  className="rounded-full bg-obsidian px-6 py-3 text-sm font-semibold text-paper shadow-glow"
-                  disabled={loading}
+                  onClick={() => {
+                    setText(SAMPLE);
+                    setFile(null);
+                  }}
+                  className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
                 >
-                  {loading ? "Analyzing..." : "Run gap analysis"}
-                </button>
-                <button
-                  onClick={() => setFile(null)}
-                  className="rounded-full border border-obsidian/20 px-6 py-3 text-sm"
-                >
-                  Clear file
+                  Load sample
                 </button>
               </div>
-              {error && <p className="text-sm text-rose">{error}</p>}
-            </div>
-          </div>
+              <div className="mt-5 grid gap-4">
+                <div className="rounded-3xl border border-dashed border-obsidian/20 bg-obsidian/5 p-6 text-center">
+                  <p className="text-base font-semibold text-obsidian/70">
+                    Drop your Word or PDF files here or
+                  </p>
+                  <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-full border border-obsidian/20 bg-white px-4 py-2 text-xs font-semibold">
+                    <input
+                      type="file"
+                      className="hidden"
+                      onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+                    />
+                    Upload from device
+                  </label>
+                  <p className="mt-3 text-xs text-obsidian/50">
+                    {file ? file.name : "No file selected"}
+                  </p>
+                </div>
 
-          <div className="card p-6">
-            <h2 className="font-display text-2xl">Coverage Pulse</h2>
-            <div className="mt-4 grid gap-3 text-sm">
-              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
-                <span>Total Requirements</span>
-                <span className="font-semibold text-paper">{summary.total}</span>
-              </div>
-              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
-                <span>OOTB Match</span>
-                <span className="font-semibold text-mint">{summary.oob}</span>
-              </div>
-              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
-                <span>Partial Match</span>
-                <span className="font-semibold text-amber">{summary.partial}</span>
-              </div>
-              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
-                <span>Custom Dev Required</span>
-                <span className="font-semibold text-signal">{summary.custom}</span>
-              </div>
-              <div className="flex justify-between rounded-2xl bg-white/10 px-4 py-3">
-                <span>Open Questions</span>
-                <span className="font-semibold text-rose">{summary.open}</span>
-              </div>
-            </div>
-            <button
-              onClick={handleGenerate}
-              disabled={loading || results.length === 0}
-              className="mt-6 w-full rounded-full bg-gold px-6 py-3 text-sm font-semibold text-obsidian"
-            >
-              {loading ? "Generating..." : "Generate FSD Draft"}
-            </button>
-          </div>
-        </section>
-
-        <section className="card p-6">
-          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="font-display text-2xl">Competitive Gap Findings</h2>
-              <p className="text-sm text-slate/70">
-                Prioritized requirements with confidence scoring and source evidence.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-slate/70">
-              <span className="rounded-full border border-white/10 px-3 py-1">Auto-ranked by impact</span>
-              <span className="rounded-full border border-white/10 px-3 py-1">Evidence-linked</span>
-              <button
-                onClick={() => setShowDebug((prev) => !prev)}
-                className="rounded-full border border-white/10 px-3 py-1 text-xs"
-              >
-                {showDebug ? "Hide debug" : "Show debug"}
-              </button>
-            </div>
-          </div>
-          <div className="mt-4 grid gap-4">
-            {results.length === 0 && (
-              <p className="text-sm text-slate/70">Run the analysis to surface strategic gaps.</p>
-            )}
-            {results.map((item, index) => {
-              const sources = getSources(item);
-              const similarityPct =
-                item.similarity_score != null ? Math.round(item.similarity_score * 100) : 0;
-
-              return (
-                <div
-                  key={`${item.requirement}-${index}`}
-                  className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <p className="text-sm font-semibold">{item.requirement}</p>
-                    <span className={`badge ${badgeTone(item.classification)}`}>
-                      {item.classification}
+                <div className="flex flex-wrap items-center gap-3">
+                  <input
+                    value={baselineName}
+                    onChange={(event) => setBaselineName(event.target.value)}
+                    className="w-full rounded-2xl border border-obsidian/15 bg-white px-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-signal/30 sm:w-64"
+                    placeholder="Baseline name (e.g., Feb-25)"
+                  />
+                  <button
+                    onClick={handleSaveBaseline}
+                    className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
+                    disabled={loading || !text.trim()}
+                  >
+                    {loading && loadingMode === "baseline"
+                      ? loadingMessage || "Saving..."
+                      : "Save baseline"}
+                  </button>
+                  {baselineNotice && (
+                    <span className="text-xs font-semibold text-obsidian/60">
+                      {baselineNotice}
                     </span>
-                  </div>
-                  {sources.length > 0 && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate/70">
-                      <span className="uppercase tracking-[0.2em] text-[0.6rem]">Sources</span>
-                      {sources.map((source) => (
-                        <a
-                          key={source.url}
-                          href={source.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="rounded-full border border-white/10 px-3 py-1 text-slate/80 hover:text-paper"
-                        >
-                          {source.title}
-                        </a>
-                      ))}
-                    </div>
-                  )}
-                  <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-slate/70">
-                    <span>Confidence: {(item.confidence * 100).toFixed(0)}%</span>
-                    <span>{item.rationale}</span>
-                  </div>
-                  {showDebug && (
-                    <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 p-3 text-xs text-slate/70">
-                      <div className="flex flex-wrap items-center gap-4">
-                        <span>Similarity score: {similarityPct}%</span>
-                        <span>
-                          LLM confidence:{" "}
-                          {item.llm_confidence != null
-                            ? `${Math.round(item.llm_confidence * 100)}%`
-                            : "n/a"}
-                        </span>
-                        <span>LLM context: top 3 evidence chunks</span>
-                      </div>
-                      <div className="mt-2 text-[0.7rem] text-slate/60">LLM response</div>
-                      <div className="mt-1 whitespace-pre-wrap text-[0.75rem] text-slate/80">
-                        {item.llm_response || "n/a"}
-                      </div>
-                    </div>
-                  )}
-                  {item.top_chunks.length > 0 && (
-                    <details className="mt-3 text-xs text-slate/70">
-                      <summary className="cursor-pointer">Top evidence</summary>
-                      <ul className="mt-2 grid gap-2">
-                        {item.top_chunks.slice(0, 3).map((chunk, idx) => (
-                          <li
-                            key={`${item.requirement}-chunk-${idx}`}
-                            className="rounded-xl border border-white/10 bg-white/5 p-3"
-                          >
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                              <span className="text-[0.65rem] uppercase tracking-[0.2em] text-slate/60">
-                                Chunk {idx + 1}
-                              </span>
-                              <span className="rounded-full border border-white/10 px-2 py-0.5 text-[0.6rem]">
-                                Used in LLM
-                              </span>
-                            </div>
-                            <p className="mt-2 line-clamp-4">{chunk.text}</p>
-                            <p className="mt-2">Score: {(chunk.score * 100).toFixed(0)}%</p>
-                          </li>
-                        ))}
-                      </ul>
-                    </details>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        </section>
 
-        <section className="panel p-6">
-          <div className="flex items-center justify-between">
-            <h2 className="font-display text-2xl">FSD Executive Preview</h2>
-            <div className="flex flex-wrap gap-2">
+                <textarea
+                  value={text}
+                  onChange={(event) => setText(event.target.value)}
+                  className="h-36 w-full rounded-2xl border border-obsidian/15 bg-white p-4 text-sm focus:outline-none focus:ring-2 focus:ring-signal/30"
+                  placeholder="Paste requirements, one per line."
+                />
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    onClick={handleAnalyze}
+                    className="rounded-full bg-signal px-6 py-3 text-sm font-semibold text-white shadow-glow"
+                    disabled={loading}
+                  >
+                    {loading && loadingMode === "analyze"
+                      ? loadingMessage || "Analyzing..."
+                      : "Start Analysis"}
+                  </button>
+                  <button
+                    onClick={() => setFile(null)}
+                    className="rounded-full border border-obsidian/20 px-6 py-3 text-sm"
+                  >
+                    Clear file
+                  </button>
+                </div>
+
+                {loading && loadingMode === "analyze" && (
+                  <div className="flex items-center gap-2 text-xs font-semibold text-obsidian/60">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-signal" />
+                    <span>{loadingMessage || "Processing"}</span>
+                  </div>
+                )}
+                {error && <p className="text-sm text-rose">{error}</p>}
+              </div>
+            </div>
+
+            <div className="card p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="section-title">Coverage Pulse</p>
+                  <h3 className="font-display text-xl">OOTB readiness snapshot</h3>
+                </div>
+                <span className="rounded-full bg-mint/20 px-3 py-1 text-xs font-semibold text-mint">
+                  {summary.total ? `${summary.total} reqs` : "No data"}
+                </span>
+              </div>
+              <div className="mt-4 grid gap-3 text-sm">
+                <div className="flex justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>Total Requirements</span>
+                  <span className="font-semibold text-obsidian">{summary.total}</span>
+                </div>
+                <div className="flex justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>OOTB Match</span>
+                  <span className="font-semibold text-mint">{summary.oob}</span>
+                </div>
+                <div className="flex justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>Partial Match</span>
+                  <span className="font-semibold text-amber">{summary.partial}</span>
+                </div>
+                <div className="flex justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>Custom Dev Required</span>
+                  <span className="font-semibold text-signal">{summary.custom}</span>
+                </div>
+                <div className="flex justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>Open Questions</span>
+                  <span className="font-semibold text-rose">{summary.open}</span>
+                </div>
+              </div>
               <button
-                onClick={() => navigator.clipboard.writeText(fsd)}
-                disabled={!fsd}
-                className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
-              >
-                Copy
-              </button>
-              <button
-                onClick={handleDownloadDocx}
+                onClick={handleGenerate}
                 disabled={loading || results.length === 0}
-                className="rounded-full bg-obsidian px-4 py-2 text-xs font-semibold text-paper"
+                className="mt-6 w-full rounded-full bg-obsidian px-6 py-3 text-sm font-semibold text-white"
               >
-                Download .docx
+                {loading && loadingMode === "generate"
+                  ? loadingMessage || "Generating..."
+                  : "Generate FSD Draft"}
               </button>
             </div>
+
+            <div className="card p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="section-title">Functional Specification Document</p>
+                  <h3 className="font-display text-xl">FSD Executive Preview</h3>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => navigator.clipboard.writeText(fsd)}
+                    disabled={!fsd}
+                    className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
+                  >
+                    Copy
+                  </button>
+                  <button
+                    onClick={handleDownloadDocx}
+                    disabled={loading || results.length === 0}
+                    className="rounded-full bg-obsidian px-4 py-2 text-xs font-semibold text-white"
+                  >
+                    {loading && loadingMode === "download"
+                      ? loadingMessage || "Preparing..."
+                      : "Download .docx"}
+                  </button>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-4 lg:grid-cols-[0.35fr_1fr]">
+                <div className="rounded-2xl border border-obsidian/10 bg-obsidian/5 p-3 text-xs">
+                  {[
+                    "Overview",
+                    "OOTB Coverage",
+                    "Partial",
+                    "Custom",
+                    "Assumptions",
+                    "Open Questions",
+                    "Effort",
+                  ].map((item, idx) => (
+                    <div
+                      key={item}
+                      className={`flex items-center gap-2 rounded-xl px-3 py-2 text-obsidian/70 ${
+                        idx === 0 ? "bg-white font-semibold" : ""
+                      }`}
+                    >
+                      <span className="h-2 w-2 rounded-full bg-signal/40" />
+                      {item}
+                    </div>
+                  ))}
+                </div>
+                <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-2xl border border-obsidian/10 bg-white p-4 text-sm text-obsidian/80">
+                  {fsd || "Generate the FSD to view it here."}
+                </pre>
+              </div>
+            </div>
           </div>
-          <pre className="mt-4 max-h-96 overflow-auto whitespace-pre-wrap rounded-2xl bg-obsidian/5 p-4 text-sm text-obsidian/80">
-            {fsd || "Generate the FSD to view it here."}
-          </pre>
+
+          <div className="grid gap-6">
+            <div className="card p-6">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="section-title">Gap Analysis Results</p>
+                  <h2 className="font-display text-2xl">Confidence-ranked coverage</h2>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-obsidian/60">
+                  <span className="rounded-full border border-obsidian/10 px-3 py-1">
+                    Auto-ranked by impact
+                  </span>
+                  <span className="rounded-full border border-obsidian/10 px-3 py-1">Evidence-linked</span>
+                  <button
+                    onClick={() => setShowDebug((prev) => !prev)}
+                    className="rounded-full border border-obsidian/10 px-3 py-1 text-xs"
+                  >
+                    {showDebug ? "Hide debug" : "Show debug"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-wrap items-center gap-3">
+                <div className="flex flex-1 items-center gap-2 rounded-full border border-obsidian/15 bg-white px-4 py-2 text-sm">
+                  <span className="text-obsidian/40">??</span>
+                  <input
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    className="w-full bg-transparent outline-none"
+                    placeholder="Search requirements..."
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                  <span className="rounded-full border border-obsidian/10 px-3 py-1">All</span>
+                  <span className="rounded-full bg-mint/20 px-3 py-1 text-mint">OOTB</span>
+                  <span className="rounded-full bg-amber/20 px-3 py-1 text-amber">Partial</span>
+                  <span className="rounded-full bg-signal/20 px-3 py-1 text-signal">Custom</span>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                {baselineSummary && (
+                  <div className="rounded-2xl border border-obsidian/10 bg-obsidian/5 p-4 text-xs text-obsidian/60">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-semibold text-obsidian/80">
+                        Baseline: {baselineSummary.name}
+                      </span>
+                      {baselineSummary.created_at && <span>Saved: {baselineSummary.created_at}</span>}
+                    </div>
+                    <div className="mt-2 flex flex-wrap items-center gap-3">
+                      <span>Added: {baselineSummary.added}</span>
+                      <span>Changed: {baselineSummary.changed}</span>
+                      <span>Unchanged: {baselineSummary.unchanged}</span>
+                      <span>Removed: {baselineSummary.removed}</span>
+                    </div>
+                  </div>
+                )}
+                {baselineRemoved.length > 0 && (
+                  <div className="rounded-2xl border border-obsidian/10 bg-obsidian/5 p-4 text-xs text-obsidian/60">
+                    <div className="font-semibold text-obsidian/80">Removed from baseline</div>
+                    <div className="mt-2 grid gap-2">
+                      {baselineRemoved.map((item, idx) => (
+                        <div key={`removed-${idx}`} className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full border border-obsidian/10 px-2 py-0.5 text-[0.6rem]">
+                            Removed
+                          </span>
+                          <span>{item.requirement || "n/a"}</span>
+                          {item.classification && (
+                            <span className="text-[0.6rem] uppercase tracking-[0.2em] text-obsidian/50">
+                              {item.classification}
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="rounded-2xl border border-obsidian/10 bg-white">
+                  <div className="grid grid-cols-[1.4fr_0.8fr_0.6fr] gap-4 border-b border-obsidian/10 px-4 py-3 text-xs font-semibold text-obsidian/60">
+                    <span>Requirement</span>
+                    <span>Classification</span>
+                    <span>Confidence</span>
+                  </div>
+                  <div className="max-h-[360px] overflow-auto">
+                    {filteredResults.length === 0 && (
+                      <p className="px-4 py-6 text-sm text-obsidian/60">
+                        Run the analysis to surface strategic gaps.
+                      </p>
+                    )}
+                    {filteredResults.map((item, index) => {
+                      const sources = getSources(item);
+                      const similarityPct =
+                        item.similarity_score != null ? Math.round(item.similarity_score * 100) : 0;
+
+                      return (
+                        <div
+                          key={`${item.requirement}-${index}`}
+                          className="border-b border-obsidian/10 px-4 py-4 last:border-b-0"
+                        >
+                          <div className="grid grid-cols-[1.4fr_0.8fr_0.6fr] gap-4">
+                            <div>
+                              <p className="text-sm font-semibold text-obsidian">
+                                {item.requirement}
+                              </p>
+                              {sources.length > 0 && (
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-obsidian/60">
+                                  {sources.map((source) => (
+                                    <a
+                                      key={source.url}
+                                      href={source.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="rounded-full border border-obsidian/10 px-3 py-1 text-obsidian/70 hover:text-obsidian"
+                                    >
+                                      {source.title}
+                                    </a>
+                                  ))}
+                                </div>
+                              )}
+                              {item.baseline_status && item.baseline_status !== "new" && (
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-obsidian/60">
+                                  <span>Baseline: {item.baseline_classification || "n/a"}</span>
+                                  {item.baseline_confidence != null && (
+                                    <span>({Math.round(item.baseline_confidence * 100)}%)</span>
+                                  )}
+                                  {item.baseline_status === "changed" && item.baseline_requirement && (
+                                    <span>Changed from: "{item.baseline_requirement}"</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex flex-col gap-2">
+                              {item.baseline_status && (
+                                <span className={`badge ${baselineTone(item.baseline_status)}`}>
+                                  {item.baseline_status}
+                                </span>
+                              )}
+                              <span className={`badge ${badgeTone(item.classification)}`}>
+                                {item.classification}
+                              </span>
+                            </div>
+                            <div className="flex flex-col items-start gap-2 text-sm text-obsidian/70">
+                              <span>{(item.confidence * 100).toFixed(0)}%</span>
+                              <span className="text-xs text-obsidian/50">Similarity {similarityPct}%</span>
+                            </div>
+                          </div>
+                          {showDebug && (
+                            <div className="mt-3 rounded-2xl border border-obsidian/10 bg-obsidian/5 p-3 text-xs text-obsidian/60">
+                              <div className="flex flex-wrap items-center gap-4">
+                                <span>Similarity score: {similarityPct}%</span>
+                                <span>
+                                  LLM confidence:{" "}
+                                  {item.llm_confidence != null
+                                    ? `${Math.round(item.llm_confidence * 100)}%`
+                                    : "n/a"}
+                                </span>
+                                <span>LLM context: top 3 evidence chunks</span>
+                              </div>
+                              <div className="mt-2 text-[0.7rem] text-obsidian/50">LLM response</div>
+                              <div className="mt-1 whitespace-pre-wrap text-[0.75rem] text-obsidian/70">
+                                {item.llm_response || "n/a"}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="section-title">Export & Save FSD</p>
+                  <h3 className="font-display text-xl">Share outputs with stakeholders</h3>
+                </div>
+                <button
+                  onClick={handleDownloadDocx}
+                  disabled={loading || results.length === 0}
+                  className="rounded-full bg-signal px-4 py-2 text-xs font-semibold text-white"
+                >
+                  Download as Word
+                </button>
+              </div>
+              <div className="mt-4 rounded-3xl border border-obsidian/10 bg-obsidian/5 p-6 text-center">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-mint/20 text-2xl">
+                  ?
+                </div>
+                <h4 className="mt-4 text-lg font-semibold">FSD Export Ready</h4>
+                <p className="mt-2 text-sm text-obsidian/60">
+                  Generate and download the executive-ready Word document.
+                </p>
+                <button
+                  onClick={handleDownloadDocx}
+                  disabled={loading || results.length === 0}
+                  className="mt-4 rounded-full bg-obsidian px-6 py-2 text-sm font-semibold text-white"
+                >
+                  {loading && loadingMode === "download"
+                    ? loadingMessage || "Preparing..."
+                    : "Export Now"}
+                </button>
+              </div>
+              <div className="mt-4 grid gap-2 text-xs text-obsidian/60">
+                <div className="flex items-center justify-between rounded-2xl border border-obsidian/10 bg-white px-4 py-3">
+                  <span>FSD exported successfully</span>
+                  <span>Just now</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border border-obsidian/10 bg-white px-4 py-3">
+                  <span>Baseline snapshot saved</span>
+                  <span>Today</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl border border-obsidian/10 bg-white px-4 py-3">
+                  <span>Confluence evidence linked</span>
+                  <span>Today</span>
+                </div>
+              </div>
+            </div>
+          </div>
         </section>
       </section>
     </main>

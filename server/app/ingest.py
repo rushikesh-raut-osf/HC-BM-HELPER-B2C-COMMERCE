@@ -29,6 +29,14 @@ def to_chunks(doc: IngestDocument) -> list[ChunkRecord]:
     if not text:
         return []
 
+    prefix_parts = []
+    if doc.title:
+        prefix_parts.append(f"Title: {doc.title}")
+    if doc.space_key:
+        prefix_parts.append(f"Space: {doc.space_key}")
+    if prefix_parts:
+        text = "\n".join(prefix_parts) + "\n\n" + text
+
     content_hash = hash_text(text)
     chunks = dedupe_chunks(chunk_text(text, settings.chunk_words, settings.chunk_overlap_words))
     records: list[ChunkRecord] = []
