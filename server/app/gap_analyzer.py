@@ -110,7 +110,8 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
             else:
                 logger.warning("LLM classify unparseable_response=%r", response_text[:500])
         except Exception as exc:
-            logger.exception("LLM classify error: %s", exc)
+            logger.warning("LLM classify failed, using similarity only: %s", exc)
+            rationale = "Similarity-based classification (LLM unavailable)"
 
     confidence = _combine_confidence(similarity_confidence, llm_confidence)
 

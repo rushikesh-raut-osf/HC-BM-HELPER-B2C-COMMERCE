@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Iterable
 
 import google.generativeai as genai
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
+from google.api_core.exceptions import ResourceExhausted
 
 from .config import settings
 
@@ -16,7 +17,11 @@ def _normalize_model_name(name: str) -> str:
     return f"models/{name}"
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(lambda exc: not isinstance(exc, ResourceExhausted)),
+)
 def embed_texts(texts: Iterable[str], task_type: str) -> list[list[float]]:
     embeddings: list[list[float]] = []
     model_name = _normalize_model_name(settings.gemini_embed_model)
@@ -30,7 +35,11 @@ def embed_texts(texts: Iterable[str], task_type: str) -> list[list[float]]:
     return embeddings
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8))
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=8),
+    retry=retry_if_exception(lambda exc: not isinstance(exc, ResourceExhausted)),
+)
 def generate_text(prompt: str) -> str:
     model = genai.GenerativeModel(_normalize_model_name(settings.gemini_response_model))
     response = model.generate_content(prompt)
