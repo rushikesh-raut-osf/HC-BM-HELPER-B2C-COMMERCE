@@ -8,7 +8,7 @@ import chromadb
 from chromadb.config import Settings as ChromaSettings
 
 from .config import settings
-from .gemini_service import embed_texts
+from .llm_service import embed_texts
 
 
 @dataclass

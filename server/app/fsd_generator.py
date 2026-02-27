@@ -6,7 +6,7 @@ import logging
 from docx import Document
 
 from .fsd_template import FSD_SECTIONS, build_fsd_prompt
-from .gemini_service import generate_text
+from .llm_service import generate_text
 
 logger = logging.getLogger(__name__)
 

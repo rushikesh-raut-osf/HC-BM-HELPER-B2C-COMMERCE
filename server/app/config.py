@@ -6,9 +6,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    gemini_api_key: str
+    llm_provider: str = "gemini"
+
+    gemini_api_key: Optional[str] = None
     gemini_embed_model: str = "gemini-embedding-001"
     gemini_response_model: str = "gemini-1.5-flash"
+
+    openai_api_key: Optional[str] = None
+    openai_embed_model: str = "text-embedding-3-small"
+    openai_response_model: str = "gpt-4o-mini"
 
     confluence_base_url: str
     confluence_email: str

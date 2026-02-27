@@ -9,7 +9,10 @@ from google.api_core.exceptions import ResourceExhausted
 from .config import settings
 
 
-genai.configure(api_key=settings.gemini_api_key)
+def _configure() -> None:
+    if not settings.gemini_api_key:
+        raise ValueError("GEMINI_API_KEY is required when LLM_PROVIDER=gemini")
+    genai.configure(api_key=settings.gemini_api_key)
 
 def _normalize_model_name(name: str) -> str:
     if name.startswith("models/") or name.startswith("tunedModels/"):
@@ -20,9 +23,12 @@ def _normalize_model_name(name: str) -> str:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
-    retry=retry_if_exception(lambda exc: not isinstance(exc, ResourceExhausted)),
+    retry=retry_if_exception(
+        lambda exc: not isinstance(exc, (ResourceExhausted, ValueError))
+    ),
 )
 def embed_texts(texts: Iterable[str], task_type: str) -> list[list[float]]:
+    _configure()
     embeddings: list[list[float]] = []
     model_name = _normalize_model_name(settings.gemini_embed_model)
     for text in texts:
@@ -38,9 +44,12 @@ def embed_texts(texts: Iterable[str], task_type: str) -> list[list[float]]:
 @retry(
     stop=stop_after_attempt(3),
     wait=wait_exponential(multiplier=1, min=1, max=8),
-    retry=retry_if_exception(lambda exc: not isinstance(exc, ResourceExhausted)),
+    retry=retry_if_exception(
+        lambda exc: not isinstance(exc, (ResourceExhausted, ValueError))
+    ),
 )
 def generate_text(prompt: str) -> str:
+    _configure()
     model = genai.GenerativeModel(_normalize_model_name(settings.gemini_response_model))
     response = model.generate_content(prompt)
     return response.text or ""

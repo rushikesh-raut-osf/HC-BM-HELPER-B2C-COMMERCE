@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 from .chroma_service import ChromaService
-from .gemini_service import generate_text
+from .llm_service import generate_text
 
 
 logger = logging.getLogger(__name__)

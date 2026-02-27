@@ -10,6 +10,8 @@ pip install -r requirements.txt
 ```
 
 2. Copy `server/.env.example` to `server/.env` and fill in values.
+   - Set `LLM_PROVIDER=gemini` or `LLM_PROVIDER=openai` to switch models.
+   - Provide the matching API key (`GEMINI_API_KEY` or `OPENAI_API_KEY`).
 
 ## Ingest
 
