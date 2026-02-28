@@ -2,7 +2,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { signOut } from "next-auth/react";
 import {
   analyzeRequirementsFile,
   analyzeRequirementsText,
@@ -127,6 +126,11 @@ export default function Home() {
   const gapTableRef = useRef<HTMLDivElement | null>(null);
   const fsdRef = useRef<HTMLDivElement | null>(null);
   const exportRef = useRef<HTMLDivElement | null>(null);
+
+  const handleSignOut = async () => {
+    await fetch("/api/gate/logout", { method: "POST" });
+    window.location.href = "/gate";
+  };
 
   useEffect(() => {
     if (!loadingMode) {
@@ -411,7 +415,7 @@ export default function Home() {
           </nav>
           <div className="flex w-full items-center gap-2 sm:w-auto">
             <button
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={handleSignOut}
               className="rounded-full border border-obsidian/10 px-3 py-1 text-xs font-semibold text-obsidian/60"
             >
               Sign out
