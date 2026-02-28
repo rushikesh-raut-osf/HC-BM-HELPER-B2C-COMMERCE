@@ -122,6 +122,7 @@ export default function Home() {
     removed: string[];
     unchanged: string[];
   } | null>(null);
+  const [actionNotice, setActionNotice] = useState("");
 
   useEffect(() => {
     if (!loadingMode) {
@@ -259,13 +260,19 @@ export default function Home() {
   };
 
   const handleGenerate = async () => {
+    if (results.length === 0) {
+      setError("Run analysis or load the demo case before generating the FSD.");
+      return;
+    }
     setLoading(true);
     setLoadingMode("generate");
     setError("");
+    setActionNotice("");
     setBaselineNotice("");
     try {
       const payload = await generateFsd(results);
       setFsd(payload.fsd);
+      setActionNotice("FSD draft generated.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -275,9 +282,14 @@ export default function Home() {
   };
 
   const handleDownloadDocx = async () => {
+    if (results.length === 0) {
+      setError("Run analysis or load the demo case before downloading the FSD.");
+      return;
+    }
     setLoading(true);
     setLoadingMode("download");
     setError("");
+    setActionNotice("");
     setBaselineNotice("");
     try {
       const blob = await generateFsdDocx(results);
@@ -289,6 +301,7 @@ export default function Home() {
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+      setActionNotice("FSD .docx downloaded.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -554,7 +567,14 @@ export default function Home() {
                 </div>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => navigator.clipboard.writeText(fsd)}
+                    onClick={async () => {
+                      if (!fsd) {
+                        setError("Generate the FSD first, then you can copy it.");
+                        return;
+                      }
+                      await navigator.clipboard.writeText(fsd);
+                      setActionNotice("FSD copied to clipboard.");
+                    }}
                     disabled={!fsd}
                     className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
                   >
@@ -571,6 +591,9 @@ export default function Home() {
                   </button>
                 </div>
               </div>
+              {actionNotice && (
+                <p className="mt-3 text-xs font-semibold text-obsidian/60">{actionNotice}</p>
+              )}
               <div className="mt-4 grid gap-4 lg:grid-cols-[0.35fr_1fr]">
                 <div className="rounded-2xl border border-obsidian/10 bg-obsidian/5 p-3 text-xs">
                   {[
