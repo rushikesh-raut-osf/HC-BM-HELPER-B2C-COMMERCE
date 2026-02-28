@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { signOut } from "next-auth/react";
 import {
   analyzeRequirementsFile,
   analyzeRequirementsText,
@@ -394,7 +395,7 @@ export default function Home() {
   return (
     <main className="app-shell min-h-screen px-4 py-8 text-obsidian sm:px-6">
       <section className="mx-auto flex max-w-7xl flex-col gap-6">
-        <header className="glass-bar">
+        <header className="glass-bar flex-col items-start gap-4 sm:flex-row sm:items-center sm:gap-4">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-signal to-mint" />
             <div>
@@ -408,12 +409,9 @@ export default function Home() {
             <button className="nav-pill">FSD Preview</button>
             <button className="nav-pill">Export</button>
           </nav>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center gap-2 sm:w-auto">
             <button
-              onClick={async () => {
-                await fetch("/api/gate/logout", { method: "POST" });
-                window.location.href = "/gate";
-              }}
+              onClick={() => signOut({ callbackUrl: "/login" })}
               className="rounded-full border border-obsidian/10 px-3 py-1 text-xs font-semibold text-obsidian/60"
             >
               Sign out
@@ -487,7 +485,7 @@ export default function Home() {
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                   <input
                     value={baselineName}
                     onChange={(event) => setBaselineName(event.target.value)}
@@ -517,7 +515,7 @@ export default function Home() {
                   placeholder="Paste requirements, one per line."
                 />
 
-                <div className="flex flex-wrap gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
                   <button
                     onClick={handleAnalyze}
                     className="rounded-full bg-signal px-6 py-3 text-sm font-semibold text-white shadow-glow"
@@ -750,8 +748,8 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="mt-4 flex flex-wrap items-center gap-3">
-                <div className="flex flex-1 items-center gap-2 rounded-full border border-obsidian/15 bg-white px-4 py-2 text-sm">
+              <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="flex w-full items-center gap-2 rounded-full border border-obsidian/15 bg-white px-4 py-2 text-sm sm:flex-1">
                   <span className="text-obsidian/40">??</span>
                   <input
                     value={search}
@@ -812,7 +810,7 @@ export default function Home() {
                 )}
 
                 <div className="rounded-2xl border border-obsidian/10 bg-white">
-                  <div className="sticky top-0 z-10 grid grid-cols-[1.7fr_0.7fr_0.7fr] items-center gap-4 border-b border-obsidian/10 bg-white/95 px-5 py-3 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-obsidian/50 backdrop-blur">
+                  <div className="sticky top-0 z-10 grid grid-cols-3 items-center gap-4 border-b border-obsidian/10 bg-white/95 px-5 py-3 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-obsidian/50 backdrop-blur md:grid-cols-[1.7fr_0.7fr_0.7fr]">
                     <span>Requirement</span>
                     <span
                       className="text-center"
@@ -843,7 +841,7 @@ export default function Home() {
                           key={`${item.requirement}-${index}`}
                           className="border-b border-obsidian/10 px-5 py-4 last:border-b-0 hover:bg-obsidian/5"
                         >
-                          <div className="grid grid-cols-[1.7fr_0.7fr_0.7fr] items-start gap-4">
+                          <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.7fr_0.7fr_0.7fr] md:items-start">
                             <div>
                               <p className="text-sm font-semibold text-obsidian">
                                 {item.requirement}
@@ -906,7 +904,7 @@ export default function Home() {
                                 </div>
                               )}
                             </div>
-                            <div className="flex flex-col items-center gap-2">
+                            <div className="flex flex-col items-start gap-2 md:items-center">
                               {item.baseline_status && (
                                 <span className={`badge ${baselineTone(item.baseline_status)}`}>
                                   {item.baseline_status}
@@ -916,8 +914,8 @@ export default function Home() {
                                 {item.classification}
                               </span>
                             </div>
-                            <div className="flex flex-col items-end gap-2 text-sm text-obsidian/70">
-                              <div className="flex items-center justify-end gap-3">
+                            <div className="flex flex-col items-start gap-2 text-sm text-obsidian/70 md:items-end">
+                              <div className="flex items-center justify-start gap-3 md:justify-end">
                                 <div
                                   className="relative h-10 w-10 rounded-full"
                                   style={{
