@@ -50,7 +50,7 @@ export default function GatePage() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               className="w-full rounded-2xl border border-obsidian/15 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-signal/30"
-              placeholder="name@osf.digital"
+              placeholder="Work email"
               type="email"
             />
             {error && <p className="text-sm text-rose">{error}</p>}
@@ -62,9 +62,6 @@ export default function GatePage() {
               {loading ? "Checking..." : "Continue"}
             </button>
           </div>
-          <p className="mt-4 text-xs text-obsidian/50">
-            Access is restricted to @osf.digital accounts.
-          </p>
         </div>
       </section>
     </main>
