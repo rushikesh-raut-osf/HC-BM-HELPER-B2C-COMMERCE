@@ -221,6 +221,15 @@ export default function Home() {
             <button className="nav-pill">Export</button>
           </nav>
           <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                await fetch("/api/gate/logout", { method: "POST" });
+                window.location.href = "/gate";
+              }}
+              className="rounded-full border border-obsidian/10 px-3 py-1 text-xs font-semibold text-obsidian/60"
+            >
+              Sign out
+            </button>
             <button className="icon-chip">?</button>
             <button className="icon-chip">?</button>
             <div className="h-9 w-9 rounded-full bg-obsidian/10" />
@@ -496,14 +505,14 @@ export default function Home() {
                 )}
 
                 <div className="rounded-2xl border border-obsidian/10 bg-white">
-                  <div className="grid grid-cols-[1.4fr_0.8fr_0.6fr] gap-4 border-b border-obsidian/10 px-4 py-3 text-xs font-semibold text-obsidian/60">
+                  <div className="sticky top-0 z-10 grid grid-cols-[1.7fr_0.7fr_0.7fr] items-center gap-4 border-b border-obsidian/10 bg-white/95 px-5 py-3 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-obsidian/50 backdrop-blur">
                     <span>Requirement</span>
-                    <span>Classification</span>
-                    <span>Confidence</span>
+                    <span className="text-center">Classification</span>
+                    <span className="text-right">Confidence</span>
                   </div>
                   <div className="max-h-[360px] overflow-auto">
                     {filteredResults.length === 0 && (
-                      <p className="px-4 py-6 text-sm text-obsidian/60">
+                      <p className="px-5 py-6 text-sm text-obsidian/60">
                         Run the analysis to surface strategic gaps.
                       </p>
                     )}
@@ -515,16 +524,16 @@ export default function Home() {
                       return (
                         <div
                           key={`${item.requirement}-${index}`}
-                          className="border-b border-obsidian/10 px-4 py-4 last:border-b-0"
+                          className="border-b border-obsidian/10 px-5 py-4 last:border-b-0 hover:bg-obsidian/5"
                         >
-                          <div className="grid grid-cols-[1.4fr_0.8fr_0.6fr] gap-4">
+                          <div className="grid grid-cols-[1.7fr_0.7fr_0.7fr] items-start gap-4">
                             <div>
                               <p className="text-sm font-semibold text-obsidian">
                                 {item.requirement}
                               </p>
-                              {sources.length > 0 && (
-                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-obsidian/60">
-                                  {sources.map((source) => (
+                              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-obsidian/60">
+                                {sources.length > 0 ? (
+                                  sources.map((source) => (
                                     <a
                                       key={source.url}
                                       href={source.url}
@@ -534,11 +543,15 @@ export default function Home() {
                                     >
                                       {source.title}
                                     </a>
-                                  ))}
-                                </div>
-                              )}
+                                  ))
+                                ) : (
+                                  <span className="rounded-full border border-obsidian/10 px-3 py-1 text-obsidian/50">
+                                    No sources yet
+                                  </span>
+                                )}
+                              </div>
                               {item.baseline_status && item.baseline_status !== "new" && (
-                                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-obsidian/60">
+                                <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.7rem] text-obsidian/60">
                                   <span>Baseline: {item.baseline_classification || "n/a"}</span>
                                   {item.baseline_confidence != null && (
                                     <span>({Math.round(item.baseline_confidence * 100)}%)</span>
@@ -549,7 +562,7 @@ export default function Home() {
                                 </div>
                               )}
                             </div>
-                            <div className="flex flex-col gap-2">
+                            <div className="flex flex-col items-center gap-2">
                               {item.baseline_status && (
                                 <span className={`badge ${baselineTone(item.baseline_status)}`}>
                                   {item.baseline_status}
@@ -559,9 +572,31 @@ export default function Home() {
                                 {item.classification}
                               </span>
                             </div>
-                            <div className="flex flex-col items-start gap-2 text-sm text-obsidian/70">
-                              <span>{(item.confidence * 100).toFixed(0)}%</span>
-                              <span className="text-xs text-obsidian/50">Similarity {similarityPct}%</span>
+                            <div className="flex flex-col items-end gap-2 text-sm text-obsidian/70">
+                              <div className="flex items-center justify-end gap-3">
+                                <div
+                                  className="relative h-10 w-10 rounded-full"
+                                  style={{
+                                    background: `conic-gradient(#0b0f14 ${Math.round(
+                                      item.confidence * 100
+                                    )}%, rgba(11, 15, 20, 0.12) 0)`,
+                                  }}
+                                >
+                                  <div className="absolute inset-1 rounded-full bg-white" />
+                                  <div className="absolute inset-0 flex items-center justify-center text-[0.65rem] font-semibold text-obsidian">
+                                    {(item.confidence * 100).toFixed(0)}%
+                                  </div>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-base font-semibold text-obsidian">
+                                    {(item.confidence * 100).toFixed(0)}%
+                                  </span>
+                                  <div className="text-[0.7rem] text-obsidian/50">Confidence</div>
+                                </div>
+                              </div>
+                              <span className="text-xs text-obsidian/50">
+                                Similarity {similarityPct}%
+                              </span>
                             </div>
                           </div>
                           {showDebug && (
