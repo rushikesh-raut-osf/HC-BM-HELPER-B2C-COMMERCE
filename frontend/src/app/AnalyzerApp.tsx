@@ -18,6 +18,85 @@ Add store locator with map view.
 Allow coupon stacking by customer group.
 Enable multi-ship to multiple addresses.`;
 
+const DEMO_RESULTS: GapResult[] = [
+  {
+    requirement: "Support coupon stacking by customer group.",
+    classification: "Partial match",
+    confidence: 0.35,
+    rationale:
+      "SFRA supports basic coupon stacking rules, but group-based constraints require custom logic.",
+    top_chunks: [
+      {
+        text: "Coupon redemptions can be configured with stackable rules. Group-based eligibility is not covered out-of-the-box.",
+        metadata: {
+          title: "SFRA Promotions Guide",
+          url: "https://docs.example.com/sfra/promotions",
+        },
+        score: 0.72,
+      },
+      {
+        text: "Customer group targeting is available via price books, but promotions require extension.",
+        metadata: {
+          title: "Promotion Targeting",
+          url: "https://docs.example.com/sfra/targeting",
+        },
+        score: 0.61,
+      },
+    ],
+    similarity_score: 0.42,
+    llm_confidence: 0.62,
+    llm_response: "Classified as partial: stack rules exist, group targeting requires customization.",
+  },
+  {
+    requirement: "Enable Apple Pay in checkout.",
+    classification: "OOTB match",
+    confidence: 0.82,
+    rationale: "Apple Pay is supported via built-in payment integrations and SFRA cartridges.",
+    top_chunks: [
+      {
+        text: "Apple Pay is supported through the SFRA payment integration pipeline.",
+        metadata: {
+          title: "SFRA Payments",
+          url: "https://docs.example.com/sfra/payments",
+        },
+        score: 0.83,
+      },
+    ],
+    similarity_score: 0.78,
+    llm_confidence: 0.86,
+    llm_response: "OOTB coverage confirmed by payments documentation.",
+  },
+  {
+    requirement: "Provide store locator with map view.",
+    classification: "Custom required",
+    confidence: 0.54,
+    rationale:
+      "SFRA includes store locator patterns, but no native map UI; custom frontend + map API needed.",
+    top_chunks: [
+      {
+        text: "Store locator API endpoints are provided; UI integration is implementation-specific.",
+        metadata: {
+          title: "Store Locator",
+          url: "https://docs.example.com/sfra/store-locator",
+        },
+        score: 0.59,
+      },
+    ],
+    similarity_score: 0.31,
+    llm_confidence: 0.58,
+    llm_response: "Custom UI required for map rendering.",
+  },
+];
+
+const DEMO_FSD = `Scope Overview
+- Payment methods include Apple Pay via SFRA integration.
+- Store locator requires custom map UI integration.
+- Coupon stacking requires custom eligibility rules.
+
+Risks & Open Items
+- Map provider selection and API limits.
+- Promotion logic for customer group targeting.`;
+
 export default function Home() {
   const [text, setText] = useState(SAMPLE);
   const [file, setFile] = useState<File | null>(null);
@@ -35,6 +114,14 @@ export default function Home() {
   const [baselineRemoved, setBaselineRemoved] = useState<BaselineRemovedItem[]>([]);
   const [baselineNotice, setBaselineNotice] = useState("");
   const [search, setSearch] = useState("");
+  const [expandedWhy, setExpandedWhy] = useState<Set<number>>(new Set());
+  const [demoMode, setDemoMode] = useState(false);
+  const [compareText, setCompareText] = useState("");
+  const [diffSummary, setDiffSummary] = useState<{
+    added: string[];
+    removed: string[];
+    unchanged: string[];
+  } | null>(null);
 
   useEffect(() => {
     if (!loadingMode) {
@@ -141,6 +228,36 @@ export default function Home() {
     }
   };
 
+  const handleScopeDiff = async () => {
+    setLoading(true);
+    setLoadingMode("analyze");
+    setError("");
+    try {
+      const [current, compare] = await Promise.all([
+        analyzeRequirementsText(text),
+        analyzeRequirementsText(compareText),
+      ]);
+      const currentSet = new Set(current.results.map((item) => item.requirement.toLowerCase()));
+      const compareSet = new Set(compare.results.map((item) => item.requirement.toLowerCase()));
+      const added: string[] = [];
+      const removed: string[] = [];
+      const unchanged: string[] = [];
+      for (const req of currentSet) {
+        if (compareSet.has(req)) unchanged.push(req);
+        else added.push(req);
+      }
+      for (const req of compareSet) {
+        if (!currentSet.has(req)) removed.push(req);
+      }
+      setDiffSummary({ added, removed, unchanged });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setLoading(false);
+      setLoadingMode(null);
+    }
+  };
+
   const handleGenerate = async () => {
     setLoading(true);
     setLoadingMode("generate");
@@ -203,6 +320,47 @@ export default function Home() {
     item.requirement.toLowerCase().includes(search.toLowerCase())
   );
 
+  const exportTraceabilityCsv = () => {
+    const rows = [
+      ["Requirement", "Classification", "Confidence", "Evidence Title", "Evidence URL"].join(","),
+    ];
+    for (const item of results) {
+      const sources = getSources(item);
+      if (!sources.length) {
+        rows.push(
+          [
+            `"${item.requirement.replaceAll('"', '""')}"`,
+            `"${item.classification.replaceAll('"', '""')}"`,
+            (item.confidence * 100).toFixed(0),
+            "",
+            "",
+          ].join(",")
+        );
+        continue;
+      }
+      for (const source of sources) {
+        rows.push(
+          [
+            `"${item.requirement.replaceAll('"', '""')}"`,
+            `"${item.classification.replaceAll('"', '""')}"`,
+            (item.confidence * 100).toFixed(0),
+            `"${source.title.replaceAll('"', '""')}"`,
+            `"${source.url.replaceAll('"', '""')}"`,
+          ].join(",")
+        );
+      }
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "traceability-matrix.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <main className="app-shell min-h-screen px-4 py-8 text-obsidian sm:px-6">
       <section className="mx-auto flex max-w-7xl flex-col gap-6">
@@ -248,6 +406,7 @@ export default function Home() {
                   onClick={() => {
                     setText(SAMPLE);
                     setFile(null);
+                    setDemoMode(false);
                   }}
                   className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
                 >
@@ -311,6 +470,20 @@ export default function Home() {
                     {loading && loadingMode === "analyze"
                       ? loadingMessage || "Analyzing..."
                       : "Start Analysis"}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setDemoMode(true);
+                      setText(SAMPLE);
+                      setFile(null);
+                      setResults(DEMO_RESULTS);
+                      setFsd(DEMO_FSD);
+                      setBaselineSummary(null);
+                      setBaselineRemoved([]);
+                    }}
+                    className="rounded-full border border-obsidian/20 px-6 py-3 text-sm"
+                  >
+                    Load demo case
                   </button>
                   <button
                     onClick={() => setFile(null)}
@@ -429,6 +602,47 @@ export default function Home() {
 
           <div className="grid gap-6">
             <div className="card p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="section-title">Scope Diff</p>
+                  <h3 className="font-display text-xl">Compare two requirement sets</h3>
+                </div>
+                <button
+                  onClick={handleScopeDiff}
+                  disabled={loading || !text.trim() || !compareText.trim()}
+                  className="rounded-full bg-obsidian px-4 py-2 text-xs font-semibold text-white"
+                >
+                  {loading && loadingMode === "analyze" ? "Comparing..." : "Compare"}
+                </button>
+              </div>
+              <div className="mt-4 grid gap-4">
+                <textarea
+                  value={compareText}
+                  onChange={(event) => setCompareText(event.target.value)}
+                  className="h-28 w-full rounded-2xl border border-obsidian/15 bg-white p-4 text-sm focus:outline-none focus:ring-2 focus:ring-signal/30"
+                  placeholder="Paste the earlier requirement set here."
+                />
+                {diffSummary && (
+                  <div className="grid gap-3 rounded-2xl border border-obsidian/10 bg-obsidian/5 p-4 text-xs text-obsidian/70">
+                    <div className="flex flex-wrap gap-3">
+                      <span>Added: {diffSummary.added.length}</span>
+                      <span>Removed: {diffSummary.removed.length}</span>
+                      <span>Unchanged: {diffSummary.unchanged.length}</span>
+                    </div>
+                    <div className="grid gap-2">
+                      {diffSummary.added.slice(0, 3).map((item) => (
+                        <span key={`add-${item}`}>+ {item}</span>
+                      ))}
+                      {diffSummary.removed.slice(0, 3).map((item) => (
+                        <span key={`remove-${item}`}>- {item}</span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="card p-6">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="section-title">Gap Analysis Results</p>
@@ -439,6 +653,13 @@ export default function Home() {
                     Auto-ranked by impact
                   </span>
                   <span className="rounded-full border border-obsidian/10 px-3 py-1">Evidence-linked</span>
+                  <button
+                    onClick={exportTraceabilityCsv}
+                    disabled={results.length === 0}
+                    className="rounded-full border border-obsidian/10 px-3 py-1 text-xs"
+                  >
+                    Export traceability
+                  </button>
                   <button
                     onClick={() => setShowDebug((prev) => !prev)}
                     className="rounded-full border border-obsidian/10 px-3 py-1 text-xs"
@@ -463,6 +684,11 @@ export default function Home() {
                   <span className="rounded-full bg-mint/20 px-3 py-1 text-mint">OOTB</span>
                   <span className="rounded-full bg-amber/20 px-3 py-1 text-amber">Partial</span>
                   <span className="rounded-full bg-signal/20 px-3 py-1 text-signal">Custom</span>
+                  {demoMode && (
+                    <span className="rounded-full bg-obsidian/10 px-3 py-1 text-obsidian/60">
+                      Demo mode
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -550,6 +776,33 @@ export default function Home() {
                                   </span>
                                 )}
                               </div>
+                              {item.top_chunks?.length > 0 && (
+                                <div className="mt-3 grid gap-2">
+                                  {item.top_chunks.slice(0, 2).map((chunk, idx) => (
+                                    <div
+                                      key={`${item.requirement}-chunk-${idx}`}
+                                      className="rounded-2xl border border-obsidian/10 bg-obsidian/5 px-3 py-2 text-xs text-obsidian/70"
+                                    >
+                                      <div className="text-[0.65rem] uppercase tracking-[0.2em] text-obsidian/50">
+                                        Evidence
+                                      </div>
+                                      <div className="mt-1">{chunk.text}</div>
+                                      {typeof chunk.metadata?.url === "string" && (
+                                        <a
+                                          className="mt-2 inline-flex items-center gap-2 text-[0.7rem] font-semibold text-obsidian/70 underline decoration-obsidian/30"
+                                          href={chunk.metadata.url}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                        >
+                                          {typeof chunk.metadata?.title === "string"
+                                            ? chunk.metadata.title
+                                            : "Open source"}
+                                        </a>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               {item.baseline_status && item.baseline_status !== "new" && (
                                 <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.7rem] text-obsidian/60">
                                   <span>Baseline: {item.baseline_classification || "n/a"}</span>
@@ -597,8 +850,34 @@ export default function Home() {
                               <span className="text-xs text-obsidian/50">
                                 Similarity {similarityPct}%
                               </span>
+                              <button
+                                onClick={() =>
+                                  setExpandedWhy((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(index)) next.delete(index);
+                                    else next.add(index);
+                                    return next;
+                                  })
+                                }
+                                className="rounded-full border border-obsidian/10 px-3 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-obsidian/60"
+                              >
+                                {expandedWhy.has(index) ? "Hide why" : "Why this?"}
+                              </button>
                             </div>
                           </div>
+                          {expandedWhy.has(index) && (
+                            <div className="mt-3 rounded-2xl border border-obsidian/10 bg-white p-3 text-xs text-obsidian/70">
+                              <div className="text-[0.65rem] uppercase tracking-[0.2em] text-obsidian/50">
+                                Explanation
+                              </div>
+                              <p className="mt-2">{item.rationale || "No rationale available."}</p>
+                              {item.llm_response && (
+                                <p className="mt-2 text-obsidian/60">
+                                  Model note: {item.llm_response}
+                                </p>
+                              )}
+                            </div>
+                          )}
                           {showDebug && (
                             <div className="mt-3 rounded-2xl border border-obsidian/10 bg-obsidian/5 p-3 text-xs text-obsidian/60">
                               <div className="flex flex-wrap items-center gap-4">
