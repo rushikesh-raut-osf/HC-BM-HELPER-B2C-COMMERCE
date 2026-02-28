@@ -1,7 +1,7 @@
 /* eslint-disable react/no-unescaped-entities */
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   analyzeRequirementsFile,
   analyzeRequirementsText,
@@ -123,6 +123,9 @@ export default function Home() {
     unchanged: string[];
   } | null>(null);
   const [actionNotice, setActionNotice] = useState("");
+  const gapTableRef = useRef<HTMLDivElement | null>(null);
+  const fsdRef = useRef<HTMLDivElement | null>(null);
+  const exportRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!loadingMode) {
@@ -281,6 +284,20 @@ export default function Home() {
     }
   };
 
+  const runGuidedDemo = () => {
+    setDemoMode(true);
+    setText(SAMPLE);
+    setFile(null);
+    setResults(DEMO_RESULTS);
+    setFsd(DEMO_FSD);
+    setBaselineSummary(null);
+    setBaselineRemoved([]);
+    setActionNotice("Demo loaded. Follow the steps below.");
+    window.setTimeout(() => gapTableRef.current?.scrollIntoView({ behavior: "smooth" }), 600);
+    window.setTimeout(() => fsdRef.current?.scrollIntoView({ behavior: "smooth" }), 1800);
+    window.setTimeout(() => exportRef.current?.scrollIntoView({ behavior: "smooth" }), 2800);
+  };
+
   const handleDownloadDocx = async () => {
     if (results.length === 0) {
       setError("Run analysis or load the demo case before downloading the FSD.");
@@ -412,6 +429,32 @@ export default function Home() {
             <div className="card p-6">
               <div className="flex items-center justify-between">
                 <div>
+                  <p className="section-title">ROI Snapshot</p>
+                  <h3 className="font-display text-xl">Before vs. After with AI</h3>
+                </div>
+                <span className="rounded-full bg-mint/20 px-3 py-1 text-xs font-semibold text-mint">
+                  Estimated
+                </span>
+              </div>
+              <div className="mt-4 grid gap-3 text-sm">
+                <div className="flex items-center justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>Requirement analysis</span>
+                  <span className="font-semibold text-obsidian">2–3 days → 20–30 min</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>FSD draft creation</span>
+                  <span className="font-semibold text-obsidian">1–2 days → 15 min</span>
+                </div>
+                <div className="flex items-center justify-between rounded-2xl bg-obsidian/5 px-4 py-3">
+                  <span>Rework rate</span>
+                  <span className="font-semibold text-obsidian">30–40% → 10–15%</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="card p-6">
+              <div className="flex items-center justify-between">
+                <div>
                   <p className="section-title">Upload Requirement Documents</p>
                   <h2 className="font-display text-2xl">Drop your Word or PDF files here</h2>
                 </div>
@@ -485,15 +528,7 @@ export default function Home() {
                       : "Start Analysis"}
                   </button>
                   <button
-                    onClick={() => {
-                      setDemoMode(true);
-                      setText(SAMPLE);
-                      setFile(null);
-                      setResults(DEMO_RESULTS);
-                      setFsd(DEMO_FSD);
-                      setBaselineSummary(null);
-                      setBaselineRemoved([]);
-                    }}
+                    onClick={runGuidedDemo}
                     className="rounded-full border border-obsidian/20 px-6 py-3 text-sm"
                   >
                     Load demo case
@@ -627,6 +662,29 @@ export default function Home() {
             <div className="card p-6">
               <div className="flex items-center justify-between">
                 <div>
+                  <p className="section-title">Demo Storyline</p>
+                  <h3 className="font-display text-xl">
+                    From scattered requirements → evidence‑backed gaps → sign‑off‑ready FSD
+                  </h3>
+                </div>
+                <button
+                  onClick={runGuidedDemo}
+                  className="rounded-full border border-obsidian/20 px-4 py-2 text-xs font-semibold"
+                >
+                  Start guided demo
+                </button>
+              </div>
+              <ol className="mt-4 grid gap-2 text-sm text-obsidian/70">
+                <li>1. Load demo case</li>
+                <li>2. Review gap table + evidence</li>
+                <li>3. Open “Why this?” for reasoning</li>
+                <li>4. Generate FSD executive preview</li>
+                <li>5. Export .docx for stakeholders</li>
+              </ol>
+            </div>
+            <div className="card p-6" ref={gapTableRef}>
+              <div className="flex items-center justify-between">
+                <div>
                   <p className="section-title">Scope Diff</p>
                   <h3 className="font-display text-xl">Compare two requirement sets</h3>
                 </div>
@@ -665,7 +723,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="card p-6">
+            <div className="card p-6" ref={fsdRef}>
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <p className="section-title">Gap Analysis Results</p>
@@ -756,8 +814,18 @@ export default function Home() {
                 <div className="rounded-2xl border border-obsidian/10 bg-white">
                   <div className="sticky top-0 z-10 grid grid-cols-[1.7fr_0.7fr_0.7fr] items-center gap-4 border-b border-obsidian/10 bg-white/95 px-5 py-3 text-[0.7rem] font-semibold uppercase tracking-[0.2em] text-obsidian/50 backdrop-blur">
                     <span>Requirement</span>
-                    <span className="text-center">Classification</span>
-                    <span className="text-right">Confidence</span>
+                    <span
+                      className="text-center"
+                      title="How well SFRA coverage matches the requirement (OOTB, Partial, Custom)."
+                    >
+                      Classification
+                    </span>
+                    <span
+                      className="text-right"
+                      title="Overall confidence based on evidence + similarity signals."
+                    >
+                      Confidence
+                    </span>
                   </div>
                   <div className="max-h-[360px] overflow-auto">
                     {filteredResults.length === 0 && (
@@ -870,7 +938,10 @@ export default function Home() {
                                   <div className="text-[0.7rem] text-obsidian/50">Confidence</div>
                                 </div>
                               </div>
-                              <span className="text-xs text-obsidian/50">
+                              <span
+                                className="text-xs text-obsidian/50"
+                                title="Text similarity between requirement and evidence chunks."
+                              >
                                 Similarity {similarityPct}%
                               </span>
                               <button
@@ -927,7 +998,7 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="card p-6">
+            <div className="card p-6" ref={exportRef}>
               <div className="flex items-center justify-between">
                 <div>
                   <p className="section-title">Export & Save FSD</p>
