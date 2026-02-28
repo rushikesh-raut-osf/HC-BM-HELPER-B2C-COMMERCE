@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 from dataclasses import dataclass
 
@@ -10,6 +11,7 @@ from chromadb.config import Settings as ChromaSettings
 from .config import settings
 from .llm_service import embed_texts
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class ChunkRecord:
@@ -67,13 +69,51 @@ def _lexical_overlap(query_text: str, doc_text: str) -> float:
     return len(intersection) / len(union)
 
 
+def _embedding_fingerprint() -> str:
+    provider = (settings.llm_provider or "gemini").strip().lower()
+    if provider == "openai":
+        model = settings.openai_embed_model
+    elif provider == "gemini":
+        model = settings.gemini_embed_model
+    else:
+        model = "unknown"
+    fingerprint = f"{provider}-{model}".lower()
+    return re.sub(r"[^a-z0-9]+", "-", fingerprint).strip("-")
+
+
+def _collection_name() -> str:
+    override = (settings.chroma_collection or "").strip()
+    if override:
+        return override
+    return f"documents-{_embedding_fingerprint()}"
+
+
+def _log_dimension_mismatch(exc: Exception) -> None:
+    collection_name = _collection_name()
+    provider = (settings.llm_provider or "gemini").strip().lower()
+    embed_model = (
+        settings.openai_embed_model if provider == "openai" else settings.gemini_embed_model
+    )
+    logger.error(
+        "Chroma embedding dimension mismatch for collection '%s'. "
+        "provider=%s embed_model=%s persist_path=%s error=%s. "
+        "Fix: re-ingest into a fresh collection (delete persist dir or set CHROMA_COLLECTION), "
+        "or switch EMBED_MODEL to match existing collection.",
+        collection_name,
+        provider,
+        embed_model,
+        settings.chroma_persist_path,
+        exc,
+    )
+
+
 class ChromaService:
     def __init__(self) -> None:
         self.client = chromadb.PersistentClient(
             path=settings.chroma_persist_path,
             settings=ChromaSettings(anonymized_telemetry=False),
         )
-        self.collection = self.client.get_or_create_collection("documents")
+        self.collection = self.client.get_or_create_collection(_collection_name())
 
     def upsert_chunks(self, records: list[ChunkRecord], task_type: str) -> int:
         if not records:
@@ -84,7 +124,14 @@ class ChromaService:
         metadatas = [r.metadata for r in records]
         documents = [r.text for r in records]
 
-        self.collection.upsert(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
+        try:
+            self.collection.upsert(
+                ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents
+            )
+        except Exception as exc:
+            if "InvalidDimensionException" in exc.__class__.__name__:
+                _log_dimension_mismatch(exc)
+            raise
         return len(records)
 
     def query(self, query_text: str, top_k: int) -> dict:
@@ -92,11 +139,16 @@ class ChromaService:
         n_results = top_k
         if settings.rerank_enabled:
             n_results = max(top_k, settings.rerank_candidates)
-        response = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            include=["documents", "metadatas", "distances"],
-        )
+        try:
+            response = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                include=["documents", "metadatas", "distances"],
+            )
+        except Exception as exc:
+            if "InvalidDimensionException" in exc.__class__.__name__:
+                _log_dimension_mismatch(exc)
+            raise
         if not settings.rerank_enabled:
             return response
 
