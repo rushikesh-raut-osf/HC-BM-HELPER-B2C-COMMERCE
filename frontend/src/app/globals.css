@@ -470,7 +470,18 @@ body {
 }
 
 .analysis-grid-toggle {
-  @apply rounded-full border border-obsidian/15 bg-white px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-obsidian/65 hover:text-obsidian;
+  @apply inline-flex items-center gap-1.5 rounded-full border border-signal/25 bg-white px-3 py-1.5 text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-obsidian/70 transition-all hover:-translate-y-[1px] hover:text-obsidian;
+  box-shadow: 0 6px 14px rgba(29, 78, 216, 0.1);
+}
+
+.analysis-grid-toggle-icon {
+  width: 0.8rem;
+  height: 0.8rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .analysis-item {
@@ -488,7 +499,27 @@ body {
 }
 
 .analysis-item-toggle {
-  @apply rounded-full border border-obsidian/15 bg-white px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-obsidian/65 transition-colors hover:text-obsidian;
+  @apply inline-flex items-center gap-1.5 rounded-full border border-signal/25 bg-gradient-to-r from-white to-slate/5 px-2.5 py-1 text-[0.62rem] font-semibold uppercase tracking-[0.1em] text-obsidian/70 transition-all duration-200 hover:-translate-y-[1px] hover:text-obsidian;
+  box-shadow: 0 5px 12px rgba(29, 78, 216, 0.08);
+}
+
+.analysis-item-toggle-label {
+  line-height: 1;
+}
+
+.analysis-item-toggle-chevron {
+  width: 0.85rem;
+  height: 0.85rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 180ms ease;
+}
+
+.analysis-item-toggle.is-expanded .analysis-item-toggle-chevron {
+  transform: rotate(180deg);
 }
 
 .followup-row {

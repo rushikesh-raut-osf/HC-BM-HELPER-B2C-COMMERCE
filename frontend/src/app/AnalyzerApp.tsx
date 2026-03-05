@@ -1283,7 +1283,10 @@ export default function AnalyzerApp() {
                               });
                             }}
                           >
-                            Expand all
+                            <svg viewBox="0 0 24 24" aria-hidden="true" className="analysis-grid-toggle-icon">
+                              <path d="M7 14l5-5 5 5" />
+                            </svg>
+                            <span>Expand all</span>
                           </button>
                           <button
                             className="analysis-grid-toggle"
@@ -1298,7 +1301,10 @@ export default function AnalyzerApp() {
                               });
                             }}
                           >
-                            Collapse all
+                            <svg viewBox="0 0 24 24" aria-hidden="true" className="analysis-grid-toggle-icon">
+                              <path d="M7 10l5 5 5-5" />
+                            </svg>
+                            <span>Collapse all</span>
                           </button>
                         </div>
                         {message.analysisResults.map((item, analysisIndex) => {
@@ -1313,7 +1319,7 @@ export default function AnalyzerApp() {
                                     {item.classification}
                                   </span>
                                   <button
-                                    className="analysis-item-toggle"
+                                    className={`analysis-item-toggle ${isExpanded ? "is-expanded" : ""}`}
                                     onClick={() =>
                                       setExpandedAnalysisKeys((prev) => {
                                         const next = new Set(prev);
@@ -1323,8 +1329,16 @@ export default function AnalyzerApp() {
                                       })
                                     }
                                     aria-expanded={isExpanded}
+                                    aria-label={isExpanded ? "Collapse details" : "Expand details"}
                                   >
-                                    {isExpanded ? "Hide details" : "Show details"}
+                                    <span className="analysis-item-toggle-label">Details</span>
+                                    <svg
+                                      viewBox="0 0 24 24"
+                                      aria-hidden="true"
+                                      className="analysis-item-toggle-chevron"
+                                    >
+                                      <path d="M7 10l5 5 5-5" />
+                                    </svg>
                                   </button>
                                 </div>
                               </div>
