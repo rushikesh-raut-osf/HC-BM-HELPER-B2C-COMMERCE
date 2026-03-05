@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import MDEditor from "@uiw/react-md-editor";
 import {
   ConfluenceFolder,
   ConfluenceSpace,
@@ -13,7 +14,9 @@ import {
   fetchConfluenceSpaces,
   generateFsd,
   generateFsdDocx,
+  generateFsdDocxFromText,
   saveFsdToConfluence,
+  saveFsdTextToConfluence,
 } from "@/lib/api";
 
 type UploadState = "uploaded";
@@ -115,6 +118,76 @@ const clarificationMessage = () =>
     "3. Any data source, integration, or acceptance criteria?",
   ].join("\n");
 
+const parseFollowUpReplyText = (text: string) => {
+  const marker = "Reply to follow-up:";
+  if (!text.startsWith(marker)) return null;
+  const body = text.slice(marker.length).trim();
+  const newlineIdx = body.indexOf("\n");
+  if (newlineIdx < 0) return null;
+  const question = body.slice(0, newlineIdx).trim();
+  const answer = body.slice(newlineIdx + 1).trim();
+  if (!question || !answer) return null;
+  return { question, answer };
+};
+
+const ensureSentence = (text: string) => {
+  const trimmed = text.trim();
+  if (!trimmed) return "";
+  return /[.!?]$/.test(trimmed) ? trimmed : `${trimmed}.`;
+};
+
+const followUpQaToNarrative = (question: string, answer: string) => {
+  const q = question.toLowerCase();
+  const a = answer.trim().replace(/\s+/g, " ");
+  if (!a) return "";
+  if ((q.includes("number of products") || q.includes("how many products")) && q.includes("carousel")) {
+    return ensureSentence(`The carousel should display ${a} products`);
+  }
+  if (q.includes("design style") && q.includes("carousel")) {
+    return ensureSentence(`The preferred carousel design style is ${a}`);
+  }
+  if (q.includes("metrics") || q.includes("criteria")) {
+    return ensureSentence(`Success criteria should be ${a}`);
+  }
+  if (q.includes("master product")) {
+    return ensureSentence(`Only master products should be selected: ${a}`);
+  }
+  if (q.includes("business manager") || q.includes("page designer") || q.includes("configurable")) {
+    return ensureSentence(`Configuration should be available in ${a}`);
+  }
+  if (q.includes("format") || q.includes("jpeg") || q.includes("png") || q.includes("svg") || q.includes("image type")) {
+    return ensureSentence(`Supported image formats should include ${a}`);
+  }
+  if (a.toLowerCase().startsWith("must ") || a.toLowerCase().startsWith("should ")) {
+    return ensureSentence(a);
+  }
+  return ensureSentence(`Additional clarification: ${a}`);
+};
+
+const buildFollowUpRequirementText = (baseRequirement: string, qa: Array<{ question: string; answer: string }>) => {
+  const requirementSentence = ensureSentence(baseRequirement.trim());
+  const contextLines = qa
+    .map((item) => followUpQaToNarrative(item.question, item.answer))
+    .filter(Boolean)
+    .join(" ");
+  return [`Requirement: ${requirementSentence}`, contextLines].filter(Boolean).join(" ");
+};
+
+const cleanRequirementText = (text: string) => text.replace(/^Requirement:\s*/i, "").trim();
+
+const splitRequirementContext = (text: string) => {
+  const cleaned = cleanRequirementText(text);
+  if (!cleaned) return { primary: "", extras: [] as string[] };
+  const sentences = cleaned
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (sentences.length <= 1) {
+    return { primary: cleaned, extras: [] as string[] };
+  }
+  return { primary: sentences[0], extras: sentences.slice(1) };
+};
+
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -193,6 +266,18 @@ const getProjectsFromThread = (thread: ChatThread) => {
   return Array.from(projects);
 };
 
+const lineToHeading = (line: string) => {
+  const trimmed = line.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("#")) {
+    return trimmed.replace(/^#{1,6}\s*/, "").trim();
+  }
+  if (trimmed.endsWith(":") && trimmed.length < 140) {
+    return trimmed.slice(0, -1).trim();
+  }
+  return "";
+};
+
 const createThread = (seed?: string): ChatThread => {
   const now = new Date().toISOString();
   const title = seed ? firstMeaningfulLine(seed).slice(0, 60) : "New scope discussion";
@@ -223,6 +308,8 @@ export default function AnalyzerApp() {
   const [actionNotice, setActionNotice] = useState("");
   const [isFsdPreviewOpen, setIsFsdPreviewOpen] = useState(false);
   const [fsdPreview, setFsdPreview] = useState("");
+  const [fsdPreviewDraft, setFsdPreviewDraft] = useState("");
+  const [isFsdPreviewEditing, setIsFsdPreviewEditing] = useState(false);
   const [fsdPreviewLoading, setFsdPreviewLoading] = useState(false);
   const [fsdSelectionsByThread, setFsdSelectionsByThread] = useState<Record<string, FsdSidebarItem[]>>({});
   const [addedMessageIdsByThread, setAddedMessageIdsByThread] = useState<Record<string, string[]>>({});
@@ -291,12 +378,12 @@ export default function AnalyzerApp() {
     [addedMessageIdsByThread, activeThreadId]
   );
   const fsdOutline = useMemo(() => {
-    const lines = fsdPreview
+    const lines = fsdPreviewDraft
       .split("\n")
-      .map((line) => line.trim())
+      .map((line) => lineToHeading(line))
       .filter(Boolean);
     return lines.slice(0, 8);
-  }, [fsdPreview]);
+  }, [fsdPreviewDraft]);
 
   const latestCounts = useMemo(() => statusCounts(latestAnalysisResults), [latestAnalysisResults]);
 
@@ -710,11 +797,7 @@ export default function AnalyzerApp() {
       const baseRequirement =
         existing?.baseRequirement || selectedFollowUpQuestion.baseRequirement || "Requirement context";
       const nextQa = [...(existing?.qa || []), { question: selectedFollowUpQuestion.question, answer: typedAnswer }];
-      const combinedContext = [
-        `Requirement context: ${baseRequirement}`,
-        ...nextQa.map((item, idx) => `Q${idx + 1}: ${item.question}\nA${idx + 1}: ${item.answer}`),
-        "Using all context above, provide a consolidated analysis response.",
-      ].join("\n\n");
+      const combinedContext = buildFollowUpRequirementText(baseRequirement, nextQa);
       const displayText = `Reply to follow-up: ${selectedFollowUpQuestion.question}\n${typedAnswer}`;
 
       setFollowUpContextByThread((prev) => ({
@@ -741,8 +824,9 @@ export default function AnalyzerApp() {
   };
 
   const handleExportDocx = async () => {
-    if (!latestAnalysisResults.length) {
-      setError("Analyze scope in chat before exporting FSD.");
+    const exportText = fsdPreviewDraft.trim() || fsdPreview.trim();
+    if (!exportText) {
+      setError("Preview FSD before exporting.");
       return;
     }
 
@@ -751,7 +835,7 @@ export default function AnalyzerApp() {
     setActionNotice("");
 
     try {
-      const blob = await generateFsdDocx(latestAnalysisResults);
+      const blob = await generateFsdDocxFromText(exportText);
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -762,6 +846,24 @@ export default function AnalyzerApp() {
       URL.revokeObjectURL(url);
       setActionNotice("FSD .docx downloaded.");
     } catch (err) {
+      if (err instanceof Error && err.message === "FSD_TEXT_EXPORT_NOT_FOUND" && latestAnalysisResults.length) {
+        try {
+          const legacyBlob = await generateFsdDocx(latestAnalysisResults);
+          const url = URL.createObjectURL(legacyBlob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "fsd.docx";
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          URL.revokeObjectURL(url);
+          setActionNotice("FSD exported. Edited preview is not supported by current backend yet.");
+          return;
+        } catch (fallbackErr) {
+          setError(fallbackErr instanceof Error ? fallbackErr.message : "Something went wrong.");
+          return;
+        }
+      }
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
       setLoading(false);
@@ -779,7 +881,10 @@ export default function AnalyzerApp() {
     setActionNotice("");
     try {
       const payload = await generateFsd(latestAnalysisResults);
-      setFsdPreview(payload.fsd || "");
+      const nextPreview = payload.fsd || "";
+      setFsdPreview(nextPreview);
+      setFsdPreviewDraft(nextPreview);
+      setIsFsdPreviewEditing(false);
       setIsFsdPreviewOpen(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unable to generate FSD preview.");
@@ -789,8 +894,9 @@ export default function AnalyzerApp() {
   };
 
   const openConfluenceModal = async () => {
-    if (!latestAnalysisResults.length) {
-      setError("Analyze scope in chat before saving to Confluence.");
+    const saveText = fsdPreviewDraft.trim() || fsdPreview.trim();
+    if (!saveText) {
+      setError("Preview FSD before saving to Confluence.");
       return;
     }
     const defaultTitle = `${activeThread?.title || "FSD"} - ${new Date().toISOString().slice(0, 10)}`;
@@ -849,8 +955,9 @@ export default function AnalyzerApp() {
       setConfluenceError("Space, folder, and filename are required.");
       return;
     }
-    if (!latestAnalysisResults.length) {
-      setConfluenceError("No analysis found to save.");
+    const saveText = fsdPreviewDraft.trim() || fsdPreview.trim();
+    if (!saveText) {
+      setConfluenceError("No preview content found to save.");
       return;
     }
 
@@ -868,9 +975,19 @@ export default function AnalyzerApp() {
         return;
       }
 
-      const saved = await saveFsdToConfluence(latestAnalysisResults, spaceKey, parentId, title);
-      setActionNotice(`Saved to Confluence: ${saved.title}`);
-      setIsConfluenceModalOpen(false);
+      try {
+        const saved = await saveFsdTextToConfluence(saveText, spaceKey, parentId, title);
+        setActionNotice(`Saved to Confluence: ${saved.title}`);
+        setIsConfluenceModalOpen(false);
+      } catch (err) {
+        if (err instanceof Error && err.message === "FSD_TEXT_SAVE_NOT_FOUND" && latestAnalysisResults.length) {
+          const saved = await saveFsdToConfluence(latestAnalysisResults, spaceKey, parentId, title);
+          setActionNotice(`Saved to Confluence: ${saved.title} (edited preview not supported by current backend).`);
+          setIsConfluenceModalOpen(false);
+          return;
+        }
+        throw err;
+      }
     } catch (err) {
       setConfluenceError(err instanceof Error ? err.message : "Unable to save to Confluence.");
     } finally {
@@ -1202,28 +1319,52 @@ export default function AnalyzerApp() {
                     {fsdOutline.length > 0 ? (
                       fsdOutline.map((line, idx) => <p key={`outline-${idx}`}>{line}</p>)
                     ) : (
-                      <p>Preview is empty.</p>
+                      <p>No headings found yet.</p>
                     )}
                   </div>
                 </div>
                 <div className="fsd-preview-content">
-                  <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-obsidian/55">
-                    Content
-                  </p>
-                  <pre className="fsd-preview-text">{fsdPreview || "No FSD content generated."}</pre>
+                  <div className="fsd-preview-content-header">
+                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-obsidian/55">
+                      Content
+                    </p>
+                    <button
+                      className="history-thread-link"
+                      onClick={() => setIsFsdPreviewEditing((prev) => !prev)}
+                    >
+                      {isFsdPreviewEditing ? "View mode" : "Edit mode"}
+                    </button>
+                  </div>
+                  {isFsdPreviewEditing ? (
+                    <div className="fsd-preview-editor" data-color-mode="light">
+                      <MDEditor
+                        value={fsdPreviewDraft}
+                        onChange={(value) => setFsdPreviewDraft(value || "")}
+                        preview="edit"
+                        height={420}
+                        visibleDragbar={false}
+                      />
+                    </div>
+                  ) : (
+                    <div className="fsd-preview-text fsd-markdown" data-color-mode="light">
+                      <MDEditor.Markdown
+                        source={fsdPreviewDraft.trim() ? fsdPreviewDraft : "No FSD content generated."}
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
               <div className="fsd-preview-actions">
                 <button
                   onClick={() => void handleExportDocx()}
-                  disabled={loading || latestAnalysisResults.length === 0}
+                  disabled={loading || !fsdPreviewDraft.trim()}
                   className="rounded-full bg-mint px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? "Preparing..." : "Export FSD (.docx)"}
                 </button>
                 <button
                   onClick={() => void openConfluenceModal()}
-                  disabled={loading || !latestAnalysisResults.length}
+                  disabled={loading || !fsdPreviewDraft.trim()}
                   className="rounded-full bg-signal px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Save to Confluence
@@ -1240,177 +1381,152 @@ export default function AnalyzerApp() {
               </div>
 
               <div className="chat-transcript" ref={chatScrollRef}>
-                {activeThread?.messages.map((message, index) => (
-                  <article
-                    key={message.id}
-                    className={`chat-bubble ${message.role} ${
-                      message.role === "assistant" &&
-                      index === 0 &&
-                      activeThread?.id === introAnimationThreadId
-                        ? "chat-bubble-intro"
-                        : ""
-                    }`}
-                  >
-                    <div className="chat-meta">
-                      <span>{message.role === "user" ? "You" : "AI Analyst"}</span>
-                      <span>{formatTime(message.createdAt)}</span>
-                    </div>
-                    <p className="chat-text">{message.text}</p>
-
-                    {message.attachments?.length ? (
-                      <div className="chat-attachments">
-                        {message.attachments.map((item) => (
-                          <span key={item.id} className="attachment-chip">
-                            {item.name} ({Math.max(1, Math.round(item.size / 1024))} KB)
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
-
-                    {message.analysisResults?.length ? (
-                      <div className="analysis-grid">
-                        <div className="analysis-grid-controls">
-                          <button
-                            className="analysis-grid-toggle"
-                            onClick={() => {
-                              if (!activeThread) return;
-                              setExpandedAnalysisKeys((prev) => {
-                                const next = new Set(prev);
-                                message.analysisResults?.forEach((_, analysisIndex) => {
-                                  next.add(`${activeThread.id}:${message.id}:${analysisIndex}`);
-                                });
-                                return next;
-                              });
-                            }}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" className="analysis-grid-toggle-icon">
-                              <path d="M7 14l5-5 5 5" />
-                            </svg>
-                            <span>Expand all</span>
-                          </button>
-                          <button
-                            className="analysis-grid-toggle"
-                            onClick={() => {
-                              if (!activeThread) return;
-                              setExpandedAnalysisKeys((prev) => {
-                                const next = new Set(prev);
-                                message.analysisResults?.forEach((_, analysisIndex) => {
-                                  next.delete(`${activeThread.id}:${message.id}:${analysisIndex}`);
-                                });
-                                return next;
-                              });
-                            }}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" className="analysis-grid-toggle-icon">
-                              <path d="M7 10l5 5 5-5" />
-                            </svg>
-                            <span>Collapse all</span>
-                          </button>
+                {activeThread?.messages.map((message, index) => {
+                  const followUpReply = message.role === "user" ? parseFollowUpReplyText(message.text) : null;
+                  if (followUpReply) {
+                    return (
+                      <div key={message.id} className="followup-message-stack">
+                        <div className="followup-inline-card followup-inline-card--standalone">
+                          <p className="followup-inline-label">Replying to follow-up</p>
+                          <p className="followup-inline-question">{followUpReply.question}</p>
                         </div>
-                        {message.analysisResults.map((item, analysisIndex) => {
-                          const analysisKey = `${activeThread?.id || "thread"}:${message.id}:${analysisIndex}`;
-                          const isExpanded = expandedAnalysisKeys.has(analysisKey);
-                          return (
+                        <article className="chat-bubble user chat-bubble-followup-attached">
+                          <div className="chat-meta">
+                            <span>You</span>
+                            <span>{formatTime(message.createdAt)}</span>
+                          </div>
+                          <p className="chat-text followup-inline-answer">{followUpReply.answer}</p>
+                        </article>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <article
+                      key={message.id}
+                      className={`chat-bubble ${message.role} ${
+                        message.role === "assistant" &&
+                        index === 0 &&
+                        activeThread?.id === introAnimationThreadId
+                          ? "chat-bubble-intro"
+                          : ""
+                      }`}
+                    >
+                      <div className="chat-meta">
+                        <span>{message.role === "user" ? "You" : "AI Analyst"}</span>
+                        <span>{formatTime(message.createdAt)}</span>
+                      </div>
+                      <p className="chat-text">{message.text}</p>
+
+                      {message.attachments?.length ? (
+                        <div className="chat-attachments">
+                          {message.attachments.map((item) => (
+                            <span key={item.id} className="attachment-chip">
+                              {item.name} ({Math.max(1, Math.round(item.size / 1024))} KB)
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {message.analysisResults?.length ? (
+                        <div className="analysis-grid">
+                          {message.analysisResults.map((item, analysisIndex) => (
                             <div key={`${item.requirement}-${analysisIndex}`} className="analysis-item">
+                              {(() => {
+                                const requirementContext = splitRequirementContext(item.requirement);
+                                return (
+                                  <>
                               <div className="analysis-item-header">
-                                <span className="font-semibold text-obsidian">{item.requirement}</span>
-                                <div className="analysis-item-header-actions">
-                                  <span className={`badge ${classifyTone(item.classification)}`}>
-                                    {item.classification}
-                                  </span>
-                                  <button
-                                    className={`analysis-item-toggle ${isExpanded ? "is-expanded" : ""}`}
-                                    onClick={() =>
-                                      setExpandedAnalysisKeys((prev) => {
-                                        const next = new Set(prev);
-                                        if (next.has(analysisKey)) next.delete(analysisKey);
-                                        else next.add(analysisKey);
-                                        return next;
-                                      })
-                                    }
-                                    aria-expanded={isExpanded}
-                                    aria-label={isExpanded ? "Collapse details" : "Expand details"}
-                                  >
-                                    <span className="analysis-item-toggle-label">Details</span>
-                                    <svg
-                                      viewBox="0 0 24 24"
-                                      aria-hidden="true"
-                                      className="analysis-item-toggle-chevron"
-                                    >
-                                      <path d="M7 10l5 5 5-5" />
-                                    </svg>
-                                  </button>
-                                </div>
+                                <span className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-obsidian/55">
+                                  Requirement Context
+                                </span>
+                                <span className={`badge ${classifyTone(item.classification)}`}>
+                                  {item.classification}
+                                </span>
                               </div>
-                              {isExpanded && (
-                                <>
-                                  <p className="text-xs text-obsidian/70">{item.rationale}</p>
-                                  {item.clarifying_questions && item.clarifying_questions.length > 0 && (
-                                    <div className="mt-2 rounded-xl border border-amber/25 bg-amber/10 px-3 py-2">
-                                      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-amber">
-                                        Follow-up needed
-                                      </p>
-                                      <div className="mt-1 grid gap-1 text-xs text-obsidian/70">
-                                        {item.clarifying_questions.slice(0, 3).map((question, qIdx) => (
-                                          <div
-                                            key={`${item.requirement}-q-${qIdx}`}
-                                            className="followup-row group/followup"
-                                          >
-                                            <p className="followup-text">- {question}</p>
-                                            <button
-                                              className="followup-arrow"
-                                              onClick={() =>
-                                                handleFollowUpQuestionSelect(question, item.requirement)
-                                              }
-                                              aria-label={`Reply to follow-up question: ${question}`}
-                                              title="Reply to this follow-up"
-                                            >
-                                              Reply
-                                            </button>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    </div>
-                                  )}
-                                  <div className="mt-2 flex flex-wrap gap-2">
-                                    {getSources(item).slice(0, 2).map((source) => (
-                                      <a
-                                        key={source.url}
-                                        href={source.url}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="rounded-full border border-obsidian/10 px-3 py-1 text-[0.65rem] text-obsidian/70"
+                              <div className="analysis-requirement-box">
+                                <p className="text-xs leading-relaxed text-obsidian/64">
+                                  {requirementContext.primary}
+                                </p>
+                                {requirementContext.extras.length > 0 && (
+                                  <ul className="mt-2 list-disc pl-5 text-xs leading-relaxed text-obsidian/64">
+                                    {requirementContext.extras.map((extra, extraIdx) => (
+                                      <li key={`${item.requirement}-extra-${extraIdx}`}>{extra}</li>
+                                    ))}
+                                  </ul>
+                                )}
+                              </div>
+                              <div className="analysis-response-box">
+                                <p className="analysis-response-label">Analysis Response</p>
+                                <p className="mt-1 text-sm font-medium leading-relaxed text-obsidian/88">
+                                  {item.rationale}
+                                </p>
+                              </div>
+                                  </>
+                                );
+                              })()}
+                              {item.clarifying_questions && item.clarifying_questions.length > 0 && (
+                                <div className="mt-2 rounded-xl border border-amber/25 bg-amber/10 px-3 py-2">
+                                  <p className="text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-amber">
+                                    Follow-up needed
+                                  </p>
+                                  <div className="mt-1 grid gap-1 text-xs text-obsidian/70">
+                                    {item.clarifying_questions.slice(0, 3).map((question, qIdx) => (
+                                      <div
+                                        key={`${item.requirement}-q-${qIdx}`}
+                                        className="followup-row group/followup"
                                       >
-                                        {source.title}
-                                      </a>
+                                        <p className="followup-text">- {question}</p>
+                                        <button
+                                          className="followup-arrow"
+                                          onClick={() => handleFollowUpQuestionSelect(question, item.requirement)}
+                                          aria-label={`Reply to follow-up question: ${question}`}
+                                          title="Reply to this follow-up"
+                                        >
+                                          Reply
+                                        </button>
+                                      </div>
                                     ))}
                                   </div>
-                                </>
+                                </div>
                               )}
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {getSources(item).slice(0, 2).map((source) => (
+                                  <a
+                                    key={source.url}
+                                    href={source.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded-full border border-obsidian/10 px-3 py-1 text-[0.65rem] text-obsidian/70"
+                                  >
+                                    {source.title}
+                                  </a>
+                                ))}
+                              </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-                {message.role === "assistant" && index > 0 && message.analysisResults?.length && (
-                  <div className="mt-3 flex justify-start">
-                    <button
-                      className="chat-fsd-btn"
-                      onClick={() => handleAddToFsd(message)}
-                          disabled={activeAddedMessageIds.has(message.id)}
-                        >
-                          {activeAddedMessageIds.has(message.id) ? "Added to FSD" : "Add to FSD"}
-                        </button>
-                        {recentlyAddedToSidebar?.threadId === activeThreadId &&
-                          recentlyAddedToSidebar?.messageId === message.id && (
-                            <span className="ml-2 self-center text-[0.68rem] font-semibold text-signal chat-inline-toast">
-                              Added to summary sidebar
-                            </span>
-                          )}
-                      </div>
-                    )}
-                  </article>
-                ))}
+                          ))}
+                        </div>
+                      ) : null}
+                      {message.role === "assistant" && index > 0 && message.analysisResults?.length && (
+                        <div className="mt-3 flex justify-start">
+                          <button
+                            className="chat-fsd-btn"
+                            onClick={() => handleAddToFsd(message)}
+                            disabled={activeAddedMessageIds.has(message.id)}
+                          >
+                            {activeAddedMessageIds.has(message.id) ? "Added to FSD" : "Add to FSD"}
+                          </button>
+                          {recentlyAddedToSidebar?.threadId === activeThreadId &&
+                            recentlyAddedToSidebar?.messageId === message.id && (
+                              <span className="ml-2 self-center text-[0.68rem] font-semibold text-signal chat-inline-toast">
+                                Added to summary sidebar
+                              </span>
+                            )}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
                 {isChatAnalyzing && (
                   <article className="chat-bubble assistant">
                     <div className="chat-meta">
@@ -1624,18 +1740,18 @@ export default function AnalyzerApp() {
                 "← Preview FSD"
               )}
             </button>
-            {fsdPreview.trim() && (
+            {fsdPreviewDraft.trim() && (
               <>
                 <button
                   onClick={() => void handleExportDocx()}
-                  disabled={loading || latestAnalysisResults.length === 0}
+                  disabled={loading || !fsdPreviewDraft.trim()}
                   className="mt-2 w-full rounded-full bg-mint px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {loading ? "Preparing..." : "Export FSD (.docx)"}
                 </button>
                 <button
                   onClick={() => void openConfluenceModal()}
-                  disabled={loading || !latestAnalysisResults.length}
+                  disabled={loading || !fsdPreviewDraft.trim()}
                   className="mt-2 w-full rounded-full bg-signal px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Save to Confluence

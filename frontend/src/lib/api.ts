@@ -134,6 +134,21 @@ export async function generateFsdDocx(results: GapResult[]) {
   return res.blob();
 }
 
+export async function generateFsdDocxFromText(fsdText: string) {
+  const res = await fetch(`${API_BASE}/generate-fsd-docx-text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ fsd_text: fsdText }),
+  });
+  if (res.status === 404) {
+    throw new Error("FSD_TEXT_EXPORT_NOT_FOUND");
+  }
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.blob();
+}
+
 export async function fetchConfluenceSpaces() {
   const res = await fetch(`${API_BASE}/confluence/spaces`);
   if (!res.ok) {
@@ -178,6 +193,31 @@ export async function saveFsdToConfluence(
       title,
     }),
   });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<{ page_id: string; title: string; url: string }>;
+}
+
+export async function saveFsdTextToConfluence(
+  fsdText: string,
+  spaceKey: string,
+  parentId: string,
+  title: string
+) {
+  const res = await fetch(`${API_BASE}/confluence/save-fsd-text`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      fsd_text: fsdText,
+      space_key: spaceKey,
+      parent_id: parentId,
+      title,
+    }),
+  });
+  if (res.status === 404) {
+    throw new Error("FSD_TEXT_SAVE_NOT_FOUND");
+  }
   if (!res.ok) {
     throw new Error(await res.text());
   }

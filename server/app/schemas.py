@@ -54,6 +54,10 @@ class GenerateFsdRequest(BaseModel):
     gap_results: list[dict]
 
 
+class GenerateFsdTextRequest(BaseModel):
+    fsd_text: str
+
+
 class SaveBaselineRequest(BaseModel):
     baseline_name: str
     requirements_text: Optional[str] = None
@@ -121,3 +125,10 @@ class ConfluenceSaveResponse(BaseModel):
     page_id: str
     title: str
     url: str
+
+
+class ConfluenceSaveTextRequest(BaseModel):
+    space_key: str
+    parent_id: str
+    title: str
+    fsd_text: str

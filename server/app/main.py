@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 
 import io
 import html
+import re
 
 from .confluence import (
     create_child_page,
@@ -23,6 +24,7 @@ from .config import settings
 from .gap_analyzer import analyze_requirement
 from .fsd_generator import (
     generate_fsd_docx,
+    generate_fsd_docx_from_text,
     generate_fsd_json,
     render_fsd_text,
 )
@@ -36,6 +38,7 @@ from .schemas import (
     AnalyzeResponse,
     GapResult,
     GenerateFsdRequest,
+    GenerateFsdTextRequest,
     GenerateFsdResponse,
     SaveBaselineRequest,
     SaveBaselineResponse,
@@ -47,6 +50,7 @@ from .schemas import (
     ConfluenceDuplicateCheckRequest,
     ConfluenceDuplicateCheckResponse,
     ConfluenceSaveRequest,
+    ConfluenceSaveTextRequest,
     ConfluenceSaveResponse,
 )
 from .baseline_store import compare_to_baseline, load_baseline, save_baseline
@@ -68,6 +72,34 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def fsd_text_to_confluence_html(title: str, fsd_text: str) -> str:
+    body_parts: list[str] = []
+    for raw_line in fsd_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            level = min(3, len(line) - len(line.lstrip("#")))
+            heading = html.escape(line.lstrip("#").strip())
+            if heading:
+                body_parts.append(f"<h{level + 1}>{heading}</h{level + 1}>")
+            continue
+        if re.match(r"^[-*]\s+", line):
+            bullet = html.escape(re.sub(r"^[-*]\s+", "", line))
+            body_parts.append(f"<ul><li>{bullet}</li></ul>")
+            continue
+        if re.match(r"^\d+\.\s+", line):
+            numbered = html.escape(re.sub(r"^\d+\.\s+", "", line))
+            body_parts.append(f"<ol><li>{numbered}</li></ol>")
+            continue
+        if line.endswith(":") and len(line) < 140:
+            heading = html.escape(line[:-1].strip())
+            body_parts.append(f"<h2>{heading}</h2>")
+            continue
+        body_parts.append(f"<p>{html.escape(line)}</p>")
+    return f"<h1>{html.escape(title)}</h1>{''.join(body_parts)}"
 
 
 @app.get("/health")
@@ -200,6 +232,22 @@ def generate_fsd_docx_endpoint(payload: GenerateFsdRequest):
     )
 
 
+@app.post("/generate-fsd-docx-text")
+def generate_fsd_docx_text_endpoint(payload: GenerateFsdTextRequest):
+    if not payload.fsd_text.strip():
+        raise HTTPException(status_code=400, detail="fsd_text is required")
+    doc = generate_fsd_docx_from_text(payload.fsd_text)
+    buffer = io.BytesIO()
+    doc.save(buffer)
+    buffer.seek(0)
+    headers = {"Content-Disposition": "attachment; filename=fsd.docx"}
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers=headers,
+    )
+
+
 @app.post("/ingest-confluence")
 def ingest_confluence():
     space_keys = [key.strip() for key in settings.confluence_space_keys.split(",") if key.strip()]
@@ -284,9 +332,36 @@ def confluence_save_fsd(payload: ConfluenceSaveRequest):
 
     fsd_json = generate_fsd_json(payload.gap_results)
     fsd_text = render_fsd_text(fsd_json)
-    html_lines = [line.strip() for line in fsd_text.splitlines() if line.strip()]
-    body = "".join(f"<p>{html.escape(line)}</p>" for line in html_lines)
-    storage_html = f"<h1>{html.escape(title)}</h1>{body}"
+    storage_html = fsd_text_to_confluence_html(title, fsd_text)
+
+    try:
+        created = create_child_page(space_key, parent_id, title, storage_html)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to save page in Confluence: {exc}") from exc
+
+    return ConfluenceSaveResponse(page_id=created.page_id, title=created.title, url=created.url)
+
+
+@app.post("/confluence/save-fsd-text", response_model=ConfluenceSaveResponse)
+def confluence_save_fsd_text(payload: ConfluenceSaveTextRequest):
+    space_key = payload.space_key.strip()
+    parent_id = payload.parent_id.strip()
+    title = payload.title.strip()
+    fsd_text = payload.fsd_text.strip()
+    if not space_key or not parent_id or not title:
+        raise HTTPException(status_code=400, detail="space_key, parent_id, and title are required")
+    if not fsd_text:
+        raise HTTPException(status_code=400, detail="fsd_text is required")
+
+    try:
+        existing = find_child_page(space_key, parent_id, title)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed duplicate check in Confluence: {exc}") from exc
+
+    if existing:
+        raise HTTPException(status_code=409, detail="A Confluence page with this title already exists in selected folder")
+
+    storage_html = fsd_text_to_confluence_html(title, fsd_text)
 
     try:
         created = create_child_page(space_key, parent_id, title, storage_html)
