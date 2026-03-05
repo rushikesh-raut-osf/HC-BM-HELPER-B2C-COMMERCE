@@ -7,6 +7,7 @@ import {
   ConfluenceFolder,
   ConfluenceSpace,
   GapResult,
+  analyzeRequirementsFile,
   analyzeRequirementsText,
   analyzeSingleRequirement,
   checkConfluenceDuplicate,
@@ -28,6 +29,10 @@ type AttachmentMeta = {
   type: string;
   uploadedAt: string;
   uploadState: UploadState;
+};
+
+type PendingAttachment = AttachmentMeta & {
+  file: File;
 };
 
 type FsdSidebarItem = {
@@ -300,7 +305,7 @@ export default function AnalyzerApp() {
   const [threads, setThreads] = useState<ChatThread[]>([createThread()]);
   const [activeThreadId, setActiveThreadId] = useState<string>(threads[0].id);
   const [composer, setComposer] = useState("");
-  const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [loading, setLoading] = useState(false);
   const [isChatAnalyzing, setIsChatAnalyzing] = useState(false);
   const [analysisStepIndex, setAnalysisStepIndex] = useState(0);
@@ -690,6 +695,7 @@ export default function AnalyzerApp() {
       type: file.type || "application/octet-stream",
       uploadedAt: now,
       uploadState: "uploaded" as const,
+      file,
     }));
     setAttachments((prev) => [...prev, ...incoming]);
   };
@@ -700,7 +706,7 @@ export default function AnalyzerApp() {
 
   const submitDiscussion = async (
     scopeTextInput: string,
-    messageAttachments: AttachmentMeta[],
+    messageAttachments: PendingAttachment[],
     forceAnalyze = false,
     singleRequirementMode = false,
     analysisTextOverride?: string
@@ -712,6 +718,14 @@ export default function AnalyzerApp() {
 
     setError("");
     setActionNotice("");
+    const messageAttachmentMeta: AttachmentMeta[] = messageAttachments.map((item) => ({
+      id: item.id,
+      name: item.name,
+      size: item.size,
+      type: item.type,
+      uploadedAt: item.uploadedAt,
+      uploadState: item.uploadState,
+    }));
 
     const now = new Date().toISOString();
     const userMessage: ChatMessage = {
@@ -719,7 +733,7 @@ export default function AnalyzerApp() {
       role: "user",
       createdAt: now,
       text: scopeText || "Uploaded context files",
-      attachments: messageAttachments.length ? messageAttachments : undefined,
+      attachments: messageAttachmentMeta.length ? messageAttachmentMeta : undefined,
     };
 
     setThreadMessages(activeThread.id, (messages) => [...messages, userMessage]);
@@ -734,7 +748,7 @@ export default function AnalyzerApp() {
       );
     }
 
-    if (!forceAnalyze && (!analysisText || looksVague(analysisText))) {
+    if (!forceAnalyze && messageAttachments.length === 0 && (!analysisText || looksVague(analysisText))) {
       const followUpMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
@@ -749,19 +763,51 @@ export default function AnalyzerApp() {
     setIsChatAnalyzing(true);
 
     try {
-      const payload = singleRequirementMode
-        ? await analyzeSingleRequirement(analysisText)
-        : await analyzeRequirementsText(analysisText);
-      const counts = statusCounts(payload.results);
+      const combinedResults: GapResult[] = [];
+      const processingNotes: string[] = [];
+
+      if (messageAttachments.length > 0) {
+        const fileResults = await Promise.allSettled(
+          messageAttachments.map((attachment) => analyzeRequirementsFile(attachment.file))
+        );
+        let failedFiles = 0;
+        for (let idx = 0; idx < fileResults.length; idx += 1) {
+          const result = fileResults[idx];
+          if (result.status === "fulfilled") {
+            combinedResults.push(...result.value.results);
+          } else {
+            failedFiles += 1;
+            processingNotes.push(`File "${messageAttachments[idx].name}" could not be analyzed.`);
+          }
+        }
+        if (failedFiles > 0 && combinedResults.length === 0 && !analysisText) {
+          throw new Error(processingNotes[0] || "Unable to analyze uploaded files.");
+        }
+      }
+
+      if (analysisText) {
+        const payload = singleRequirementMode
+          ? await analyzeSingleRequirement(analysisText)
+          : await analyzeRequirementsText(analysisText);
+        combinedResults.push(...payload.results);
+      }
+
+      const counts = statusCounts(combinedResults);
       const total = counts.total || 1;
-      const summaryText = `Analyzed ${counts.total} requirements: ${counts.ootb} OOTB (${Math.round((counts.ootb / total) * 100)}%), ${counts.partial} partial (${Math.round((counts.partial / total) * 100)}%), ${counts.custom} custom dev required (${Math.round((counts.custom / total) * 100)}%), ${counts.open} open (${Math.round((counts.open / total) * 100)}%).`;
+      const sourceNote =
+        messageAttachments.length > 0
+          ? ` (including ${messageAttachments.length} uploaded file${messageAttachments.length > 1 ? "s" : ""})`
+          : "";
+      const summaryText = `Analyzed ${counts.total} requirements${sourceNote}: ${counts.ootb} OOTB (${Math.round((counts.ootb / total) * 100)}%), ${counts.partial} partial (${Math.round((counts.partial / total) * 100)}%), ${counts.custom} custom dev required (${Math.round((counts.custom / total) * 100)}%), ${counts.open} open (${Math.round((counts.open / total) * 100)}%).${
+        processingNotes.length ? `\n${processingNotes.join("\n")}` : ""
+      }`;
 
       const assistantMessage: ChatMessage = {
         id: crypto.randomUUID(),
         role: "assistant",
         createdAt: new Date().toISOString(),
         text: summaryText,
-        analysisResults: payload.results,
+        analysisResults: combinedResults,
       };
 
       setThreadMessages(activeThread.id, (messages) => [...messages, assistantMessage]);
