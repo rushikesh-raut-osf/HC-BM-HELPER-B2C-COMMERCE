@@ -66,6 +66,12 @@ const ANALYSIS_STEPS = [
   "Finalizing",
 ];
 
+const STARTER_PROMPTS = [
+  "Add a recommended product carousel on homepage using Einstein data.",
+  "Enable configurable image carousel in homepage with PNG/JPEG/SVG support.",
+  "Add checkout address validation with clear error handling requirements.",
+];
+
 const DOMAIN_HINTS = [
   "checkout",
   "payment",
@@ -367,6 +373,12 @@ export default function AnalyzerApp() {
       if (messages[i].analysisResults?.length) return messages[i].analysisResults || [];
     }
     return [] as GapResult[];
+  }, [activeThread]);
+
+  const isDiscussionIdle = useMemo(() => {
+    const msgs = activeThread?.messages || [];
+    if (msgs.length !== 1) return false;
+    return msgs[0].role === "assistant" && !msgs[0].analysisResults?.length;
   }, [activeThread]);
 
   const activeFsdSelections = useMemo(
@@ -1008,13 +1020,14 @@ export default function AnalyzerApp() {
           </button>
           <div className="workspace-brand" aria-label="SCOUT - SFRA AI Agent Requirements Intelligence">
             <img src="/scout-logo.png" alt="SCOUT" className="workspace-brand-logo" />
+            <span className="workspace-brand-tagline">Build on clarity.</span>
             <span className="sr-only">SFRA AI Agent Requirements Intelligence</span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
           <button
-            className="rounded-full px-2 py-1 text-xs font-semibold text-obsidian/65 underline decoration-obsidian/35 underline-offset-2 hover:text-obsidian"
+            className="rounded-full px-2 py-1 text-xs font-semibold text-obsidian/80 underline decoration-obsidian/45 underline-offset-2 hover:text-obsidian"
             onClick={() => {
               setIsHelpOpen(true);
               setIsSettingsOpen(false);
@@ -1026,7 +1039,7 @@ export default function AnalyzerApp() {
 
           <div className="relative" ref={settingsMenuRef}>
             <button
-              className="inline-flex items-center gap-2 rounded-full border border-obsidian/10 bg-obsidian/5 px-4 py-2 text-xs font-semibold text-obsidian/70"
+              className="settings-btn inline-flex items-center gap-2 rounded-full border border-obsidian/10 bg-obsidian/5 px-4 py-2 text-xs font-semibold text-obsidian/70"
               onClick={() => {
                 setIsSettingsOpen((prev) => !prev);
                 setIsProfileOpen(false);
@@ -1061,7 +1074,7 @@ export default function AnalyzerApp() {
 
           <div className="relative" ref={profileMenuRef}>
             <button
-              className="icon-chip"
+              className="icon-chip profile-chip"
               onClick={() => {
                 setIsProfileOpen((prev) => !prev);
                 setIsSettingsOpen(false);
@@ -1266,18 +1279,46 @@ export default function AnalyzerApp() {
                       {renamingThreadId !== thread.id && (
                         <div className="history-thread-links">
                           <button
-                            className="history-thread-link"
+                            className="history-thread-icon-btn"
                             onClick={() => handleRenameThread(thread.id)}
                             aria-label={`Rename ${thread.title}`}
+                            title="Rename"
                           >
-                            Rename
+                            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5">
+                              <path
+                                d="M4 20h4l10-10-4-4L4 16v4Z"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.9"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              <path
+                                d="M12.8 7.2l4 4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.9"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
                           </button>
                           <button
-                            className="history-thread-link delete"
+                            className="history-thread-icon-btn delete"
                             onClick={() => handleDeleteThread(thread.id)}
                             aria-label={`Delete ${thread.title}`}
+                            title="Delete"
                           >
-                            Delete
+                            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5">
+                              <path
+                                d="M5 7h14M9 7V5h6v2m-7 0 1 12h6l1-12"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.9"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
                           </button>
                         </div>
                       )}
@@ -1310,10 +1351,10 @@ export default function AnalyzerApp() {
         <section className="chat-panel" aria-label="Main chat panel">
           {isFsdPreviewOpen ? (
             <div className="fsd-preview-wrap">
-              <div className="chat-panel-header">
+              <div className="chat-panel-header flex items-center justify-between gap-3">
                 <p className="section-title">FSD Preview</p>
                 <button
-                  className="history-thread-link"
+                  className="preview-back-btn"
                   onClick={() => setIsFsdPreviewOpen(false)}
                   aria-label="Close FSD preview"
                 >
@@ -1384,13 +1425,53 @@ export default function AnalyzerApp() {
           ) : (
             <>
               <div className="chat-panel-header">
-                <p className="section-title">Requirement Discussion</p>
-                <p className="text-xs font-semibold text-obsidian/55">
-                  Discuss scope with AI and finalize analysis output
-                </p>
+                <p className="section-title">Requirements Analysis</p>
               </div>
 
-              <div className="chat-transcript" ref={chatScrollRef}>
+              <div className={`chat-transcript ${isDiscussionIdle ? "chat-transcript-empty" : ""}`} ref={chatScrollRef}>
+                {isDiscussionIdle && (
+                  <div className="chat-empty-guide">
+                    <div className="chat-empty-head">
+                      <div className="chat-empty-kicker-row">
+                        <span className="chat-empty-idea-icon" aria-hidden="true">
+                          <svg
+                            viewBox="0 0 24 24"
+                            className="h-3.5 w-3.5"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.9"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M8.2 10a3.8 3.8 0 1 1 7.6 0c0 1.4-.7 2.4-1.6 3.3-.6.6-1 1.2-1.1 2h-2.2c-.1-.8-.5-1.4-1.1-2C8.9 12.4 8.2 11.4 8.2 10Z" />
+                            <path d="M9.8 18.1h4.4M10.5 20h3" />
+                          </svg>
+                        </span>
+                        <p className="chat-empty-kicker">Start with a clear requirement</p>
+                      </div>
+                      <h3 className="chat-empty-title">Turn initial ideas into FSD-ready analysis</h3>
+                      <p className="chat-empty-copy">
+                        Share one concrete requirement with behavior, scope, and constraints to get higher quality
+                        classification and rationale.
+                      </p>
+                    </div>
+                    <div className="chat-empty-starters">
+                      {STARTER_PROMPTS.map((prompt, idx) => (
+                        <button
+                          key={`starter-${idx}`}
+                          className="chat-starter-chip"
+                          onClick={() => {
+                            setComposer(prompt);
+                            setError("");
+                            window.setTimeout(() => composerRef.current?.focus(), 0);
+                          }}
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {activeThread?.messages.map((message, index) => {
                   const followUpReply = message.role === "user" ? parseFollowUpReplyText(message.text) : null;
                   if (followUpReply) {
@@ -1420,6 +1501,10 @@ export default function AnalyzerApp() {
                         activeThread?.id === introAnimationThreadId
                           ? "chat-bubble-intro"
                           : ""
+                      } ${
+                        isDiscussionIdle && message.role === "assistant" && index === 0
+                          ? "chat-bubble-onboarding"
+                          : ""
                       }`}
                     >
                       <div className="chat-meta">
@@ -1427,7 +1512,7 @@ export default function AnalyzerApp() {
                           <span>You</span>
                         ) : (
                           <span className="chat-author">
-                            <img src="/scout-icon.png" alt="" className="chat-author-icon" aria-hidden="true" />
+                            <img src="/scout-profile-icon.svg" alt="" className="chat-author-icon" aria-hidden="true" />
                             <span>AI Analyst</span>
                           </span>
                         )}
@@ -1548,7 +1633,7 @@ export default function AnalyzerApp() {
                   <article className="chat-bubble assistant">
                     <div className="chat-meta">
                       <span className="chat-author">
-                        <img src="/scout-icon.png" alt="" className="chat-author-icon" aria-hidden="true" />
+                        <img src="/scout-profile-icon.svg" alt="" className="chat-author-icon" aria-hidden="true" />
                         <span>AI Analyst</span>
                       </span>
                     </div>
@@ -1560,7 +1645,7 @@ export default function AnalyzerApp() {
                 )}
               </div>
 
-              <div className="chat-composer-wrap">
+              <div className={`chat-composer-wrap ${isDiscussionIdle ? "chat-composer-wrap-highlight" : ""}`}>
                 {selectedFollowUpQuestion && (
                   <div className="selected-followup">
                     <div className="selected-followup-label">Replying to follow-up:</div>
@@ -1642,8 +1727,7 @@ export default function AnalyzerApp() {
         >
           <div className="summary-header">
             <div>
-              <p className="section-title">Summary & Analysis</p>
-              <h2 className="font-display text-xl text-obsidian">FSD Generation</h2>
+              <p className="section-title">FSD Builder</p>
             </div>
             <button
               className="icon-chip lg:hidden"
@@ -1694,9 +1778,16 @@ export default function AnalyzerApp() {
                     <path d="M8 9h8M8 12h5" />
                   </svg>
                 </span>
-                <p className="text-sm text-obsidian/60">
-                  Start a discussion, then add finalized requirements and AI responses here.
+                <p className="summary-empty-title">No finalized FSD points yet</p>
+                <p className="summary-empty-copy">
+                  Start a discussion, validate responses, then add approved requirement-analysis pairs to build
+                  your final document.
                 </p>
+                <div className="summary-empty-steps" aria-label="How to build FSD">
+                  <span className="summary-empty-step">1. Discuss requirements</span>
+                  <span className="summary-empty-step">2. Click Add to FSD</span>
+                  <span className="summary-empty-step">3. Preview and export</span>
+                </div>
               </div>
             ) : (
               activeFsdSelections.map((item) => (
