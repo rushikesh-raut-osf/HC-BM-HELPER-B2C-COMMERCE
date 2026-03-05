@@ -1568,83 +1568,6 @@ export default function AnalyzerApp() {
                     </div>
                   </div>
                 )}
-                {activeGuidedCycle &&
-                  (activeGuidedCycle.status === "guided" || activeGuidedCycle.status === "cancelled") && (
-                    <div className="guided-card">
-                      <div className="guided-card-head">
-                        <p className="guided-kicker">
-                          Guided Follow-up • Step{" "}
-                          {Math.min(activeGuidedCycle.currentStepIndex + 1, activeGuidedCycle.maxSteps)} of{" "}
-                          {activeGuidedCycle.maxSteps}
-                        </p>
-                        <button className="guided-dismiss" onClick={handleDismissGuided}>
-                          Dismiss (Esc)
-                        </button>
-                      </div>
-                      {activeGuidedCycle.status === "cancelled" ? (
-                        <p className="guided-cancel-note">
-                          Guided questions were dismissed. You can still analyze using collected context.
-                        </p>
-                      ) : (
-                        <>
-                          <p className="guided-question">
-                            {activeGuidedCycle.currentQuestion || "Loading follow-up question..."}
-                          </p>
-                          <div className="guided-options">
-                            {(activeGuidedCycle.currentOptions || []).map((option, idx) => (
-                              <button
-                                key={`${option.label}-${idx}`}
-                                className={`guided-option ${selectedGuidedOption === option.label ? "selected" : ""}`}
-                                onClick={() => {
-                                  setSelectedGuidedOption(option.label);
-                                  setGuidedCustomDraft("");
-                                }}
-                                disabled={guidedLoading}
-                              >
-                                <span>{option.label}</span>
-                                {option.recommended && <span className="guided-badge">Recommended</span>}
-                              </button>
-                            ))}
-                          </div>
-                          <div className="guided-custom-row">
-                            <input
-                              value={guidedCustomDraft}
-                              onChange={(event) => {
-                                setGuidedCustomDraft(event.target.value);
-                                if (event.target.value.trim()) setSelectedGuidedOption("");
-                              }}
-                              placeholder="Or add custom input..."
-                              className="guided-custom-input"
-                              onKeyDown={(event) => {
-                                if (event.key === "Enter") {
-                                  event.preventDefault();
-                                  if (!guidedLoading) void handleGuidedNext();
-                                }
-                              }}
-                            />
-                          </div>
-                        </>
-                      )}
-                      <div className="guided-actions">
-                        {activeGuidedCycle.status === "guided" && (
-                          <button
-                            className="guided-next-btn"
-                            onClick={() => void handleGuidedNext()}
-                            disabled={guidedLoading}
-                          >
-                            {guidedLoading ? "Loading..." : "Next"}
-                          </button>
-                        )}
-                        <button
-                          className="guided-analyze-btn"
-                          onClick={() => void handleAnalyzeNow()}
-                          disabled={loading || !activeGuidedCycle.baseRequirement}
-                        >
-                          Analyze now
-                        </button>
-                      </div>
-                    </div>
-                  )}
                 {activeThread?.messages.map((message, index) => {
                   const followUpReply = message.role === "user" ? parseFollowUpReplyText(message.text) : null;
                   if (followUpReply) {
@@ -1837,6 +1760,83 @@ export default function AnalyzerApp() {
               </div>
 
               <div className={`chat-composer-wrap ${isDiscussionIdle ? "chat-composer-wrap-highlight" : ""}`}>
+                {activeGuidedCycle &&
+                  (activeGuidedCycle.status === "guided" || activeGuidedCycle.status === "cancelled") && (
+                    <div className="guided-card guided-card-in-composer">
+                      <div className="guided-card-head">
+                        <p className="guided-kicker">
+                          Guided Follow-up • Step{" "}
+                          {Math.min(activeGuidedCycle.currentStepIndex + 1, activeGuidedCycle.maxSteps)} of{" "}
+                          {activeGuidedCycle.maxSteps}
+                        </p>
+                        <button className="guided-dismiss" onClick={handleDismissGuided}>
+                          Dismiss (Esc)
+                        </button>
+                      </div>
+                      {activeGuidedCycle.status === "cancelled" ? (
+                        <p className="guided-cancel-note">
+                          Guided questions were dismissed. You can still analyze using collected context.
+                        </p>
+                      ) : (
+                        <>
+                          <p className="guided-question">
+                            {activeGuidedCycle.currentQuestion || "Loading follow-up question..."}
+                          </p>
+                          <div className="guided-options">
+                            {(activeGuidedCycle.currentOptions || []).map((option, idx) => (
+                              <button
+                                key={`${option.label}-${idx}`}
+                                className={`guided-option ${selectedGuidedOption === option.label ? "selected" : ""}`}
+                                onClick={() => {
+                                  setSelectedGuidedOption(option.label);
+                                  setGuidedCustomDraft("");
+                                }}
+                                disabled={guidedLoading}
+                              >
+                                <span>{option.label}</span>
+                                {option.recommended && <span className="guided-badge">Recommended</span>}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="guided-custom-row">
+                            <input
+                              value={guidedCustomDraft}
+                              onChange={(event) => {
+                                setGuidedCustomDraft(event.target.value);
+                                if (event.target.value.trim()) setSelectedGuidedOption("");
+                              }}
+                              placeholder="Or add custom input..."
+                              className="guided-custom-input"
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  if (!guidedLoading) void handleGuidedNext();
+                                }
+                              }}
+                            />
+                          </div>
+                        </>
+                      )}
+                      <div className="guided-actions">
+                        {activeGuidedCycle.status === "guided" && (
+                          <button
+                            className="guided-next-btn"
+                            onClick={() => void handleGuidedNext()}
+                            disabled={guidedLoading}
+                          >
+                            {guidedLoading ? "Loading..." : "Next"}
+                          </button>
+                        )}
+                        <button
+                          className="guided-analyze-btn"
+                          onClick={() => void handleAnalyzeNow()}
+                          disabled={loading || !activeGuidedCycle.baseRequirement}
+                        >
+                          Analyze now
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 <div className="chat-attachments-list">
                   {attachments.map((item) => (
                     <span key={item.id} className="attachment-chip">

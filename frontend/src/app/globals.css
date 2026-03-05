@@ -613,6 +613,11 @@ body {
   box-shadow: 0 10px 24px rgba(37, 99, 235, 0.1);
 }
 
+.guided-card-in-composer {
+  width: 100%;
+  margin-bottom: 0.75rem;
+}
+
 .guided-card-head {
   display: flex;
   align-items: center;
