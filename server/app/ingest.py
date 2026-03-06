@@ -24,6 +24,14 @@ def hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _safe_meta(value: object) -> str | int | float | bool:
+    if value is None:
+        return ""
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
 def to_chunks(doc: IngestDocument) -> list[ChunkRecord]:
     text = doc.text.strip()
     if not text:
@@ -44,12 +52,12 @@ def to_chunks(doc: IngestDocument) -> list[ChunkRecord]:
     for index, chunk in enumerate(chunks):
         doc_id = f"{doc.source}:{doc.source_id}:{index}"
         metadata = {
-            "source": doc.source,
-            "source_id": doc.source_id,
-            "title": doc.title,
-            "url": doc.url,
-            "space_key": doc.space_key,
-            "updated_at": str(doc.updated_at) if doc.updated_at else None,
+            "source": _safe_meta(doc.source),
+            "source_id": _safe_meta(doc.source_id),
+            "title": _safe_meta(doc.title),
+            "url": _safe_meta(doc.url),
+            "space_key": _safe_meta(doc.space_key),
+            "updated_at": _safe_meta(str(doc.updated_at) if doc.updated_at else ""),
             "chunk_index": index,
             "content_hash": content_hash,
         }
