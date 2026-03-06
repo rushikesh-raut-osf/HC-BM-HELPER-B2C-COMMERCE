@@ -39,7 +39,14 @@ type AttachmentMeta = {
 type FsdSidebarItem = {
   id: string;
   messageId: string;
+  createdAt: string;
+  pinned: boolean;
+  requirementText: string;
+  clarifications: Array<{ question: string; answer: string }>;
+  finalSummary: string;
   response: string;
+  evidence: Array<{ title: string; url?: string; source?: string; sourceId?: string; score?: number }>;
+  effort: "Short" | "Medium" | "Long";
   requirements: string[];
   classifications: string[];
 };
@@ -251,6 +258,15 @@ const parseConsolidatedClarifications = (text: string) => {
   return { pairs, summary, summaryPoints };
 };
 
+const normalizeForMatch = (text: string) => text.toLowerCase().replace(/\s+/g, " ").trim();
+
+const estimateEffort = (text: string): "Short" | "Medium" | "Long" => {
+  const length = text.trim().length;
+  if (length < 260) return "Short";
+  if (length < 650) return "Medium";
+  return "Long";
+};
+
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -449,6 +465,7 @@ export default function AnalyzerApp() {
   const [guidedCycleByThread, setGuidedCycleByThread] = useState<Record<string, GuidedCycle | null>>({});
   const [guidedCustomDraft, setGuidedCustomDraft] = useState("");
   const [guidedLoading, setGuidedLoading] = useState(false);
+  const [guidedBootstrapping, setGuidedBootstrapping] = useState(false);
   const [selectedGuidedOption, setSelectedGuidedOption] = useState<string>("");
   const [recentlyAddedToSidebar, setRecentlyAddedToSidebar] = useState<{
     threadId: string;
@@ -501,6 +518,7 @@ export default function AnalyzerApp() {
     () => (activeThread ? guidedCycleByThread[activeThread.id] || null : null),
     [guidedCycleByThread, activeThread]
   );
+  const isGuidedInputLocked = activeGuidedCycle?.status === "guided";
 
   const activeFsdSelections = useMemo(
     () => fsdSelectionsByThread[activeThreadId] || [],
@@ -546,6 +564,18 @@ export default function AnalyzerApp() {
       open: Math.round((fsdCoverageCounts.open / total) * 100),
     };
   }, [fsdCoverageCounts]);
+
+  const sortedFsdSelections = useMemo(
+    () =>
+      activeFsdSelections
+        .map((item, index) => ({ item, index }))
+        .sort((a, b) => {
+          if (a.item.pinned !== b.item.pinned) return a.item.pinned ? -1 : 1;
+          return a.index - b.index;
+        })
+        .map(({ item }) => item),
+    [activeFsdSelections]
+  );
 
   const filteredThreads = useMemo(() => {
     const query = threadSearch.trim().toLowerCase();
@@ -814,40 +844,78 @@ export default function AnalyzerApp() {
     if (!activeThread) return;
     if (activeAddedMessageIds.has(message.id)) return;
 
-    const uptoIndex = activeThread.messages.findIndex((msg) => msg.id === message.id);
-    const consideredMessages =
-      uptoIndex >= 0 ? activeThread.messages.slice(0, uptoIndex + 1) : activeThread.messages;
-    const allAnalyzed = consideredMessages.flatMap((msg) => msg.analysisResults || []);
-    const uniqueRequirements = Array.from(new Set(allAnalyzed.map((item) => item.requirement).filter(Boolean)));
-    const uniqueClassifications = Array.from(
-      new Set(allAnalyzed.map((item) => item.classification).filter(Boolean))
+    const messageIndex = activeThread.messages.findIndex((msg) => msg.id === message.id);
+    const primaryResult = (message.analysisResults || [])[0];
+    const requirementBlob = primaryResult?.requirement || "";
+    const parsedRequirement = parseConsolidatedClarifications(requirementBlob);
+    const requirementSeed = (() => {
+      for (let i = messageIndex - 1; i >= 0; i -= 1) {
+        const prev = activeThread.messages[i];
+        if (prev.role !== "user") continue;
+        if (prev.kind === "normal") return prev.text.trim();
+      }
+      return "";
+    })();
+    const requirementText = requirementSeed || "Requirement captured from discussion";
+    const clarifications = parsedRequirement?.pairs || [];
+    const finalSummary = parsedRequirement?.summary || "";
+    const evidence = primaryResult ? getSources(primaryResult).slice(0, 4) : [];
+    const classifications = Array.from(
+      new Set((message.analysisResults || []).map((item) => item.classification).filter(Boolean))
     );
-    const consolidatedRationale = allAnalyzed
-      .map((item) => item.rationale?.trim())
-      .filter(Boolean)
-      .join(" ");
-    const userContext = consideredMessages
-      .filter((msg) => msg.role === "user")
-      .map((msg) => msg.text.trim())
-      .filter(Boolean)
-      .join(" ");
-    const analysisText = [userContext ? `Context discussed: ${userContext}` : "", consolidatedRationale]
-      .filter(Boolean)
-      .join("\n\n")
-      .trim();
+    const analysisText = primaryResult?.rationale?.trim() || message.text.trim();
+    const effort = estimateEffort(`${requirementText} ${analysisText}`);
 
     const newItem: FsdSidebarItem = {
-      id: `fsd-${message.id}`,
+      id: `fsd-${message.id}-${Date.now()}`,
       messageId: message.id,
-      response: analysisText || message.text,
-      requirements: uniqueRequirements,
-      classifications: uniqueClassifications,
+      createdAt: new Date().toISOString(),
+      pinned: false,
+      requirementText,
+      clarifications,
+      finalSummary,
+      response: analysisText || "Analysis captured from AI response.",
+      evidence,
+      effort,
+      requirements: requirementText ? [requirementText] : [],
+      classifications,
     };
 
     setFsdSelectionsByThread((prev) => {
       const current = prev[activeThread.id] || [];
-      const exists = current.some((item) => item.messageId === message.id);
-      if (exists) return prev;
+      const duplicate = current.find(
+        (item) => normalizeForMatch(item.requirementText) === normalizeForMatch(newItem.requirementText)
+      );
+      if (duplicate) {
+        const shouldMerge = window.confirm(
+          "A similar FSD point already exists.\n\nClick OK to merge with existing point, or Cancel to keep both."
+        );
+        if (shouldMerge) {
+          const merged: FsdSidebarItem = {
+            ...duplicate,
+            clarifications: [
+              ...duplicate.clarifications,
+              ...newItem.clarifications.filter(
+                (entry) =>
+                  !duplicate.clarifications.some(
+                    (old) =>
+                      normalizeForMatch(old.question) === normalizeForMatch(entry.question) &&
+                      normalizeForMatch(old.answer) === normalizeForMatch(entry.answer)
+                  )
+              ),
+            ],
+            finalSummary: duplicate.finalSummary || newItem.finalSummary,
+            response: `${duplicate.response}\n\n${newItem.response}`.trim(),
+            evidence: [...duplicate.evidence, ...newItem.evidence].slice(0, 6),
+            classifications: Array.from(new Set([...duplicate.classifications, ...newItem.classifications])),
+            effort: estimateEffort(`${duplicate.response}\n${newItem.response}`),
+          };
+          return {
+            ...prev,
+            [activeThread.id]: current.map((item) => (item.id === duplicate.id ? merged : item)),
+          };
+        }
+      }
       return { ...prev, [activeThread.id]: [...current, newItem] };
     });
 
@@ -959,7 +1027,7 @@ export default function AnalyzerApp() {
   const startGuidedCycle = async (scopeTextInput: string, messageAttachments: AttachmentMeta[]) => {
     if (!activeThread) return;
     const scopeText = scopeTextInput.trim();
-    if (!scopeText && messageAttachments.length === 0) return;
+    if (!scopeText && messageAttachments.length === 0) return false;
 
     setError("");
     setActionNotice("");
@@ -996,10 +1064,31 @@ export default function AnalyzerApp() {
       currentOptions: [],
       isTerminal: false,
     };
-    patchGuidedCycle(activeThread.id, () => cycle);
+    setGuidedBootstrapping(true);
     setGuidedCustomDraft("");
     setSelectedGuidedOption("");
-    await loadGuidedStep(activeThread.id, cycle, 0);
+    try {
+      const step = await fetchFollowupStep(cycle.baseRequirement, [], 0, cycle.maxSteps);
+      patchGuidedCycle(activeThread.id, () => ({
+        ...cycle,
+        currentStepIndex: 0,
+        currentQuestion: step.question,
+        currentOptions: step.options,
+        isTerminal: step.is_terminal,
+      }));
+    } catch {
+      const fallback = FALLBACK_GUIDED_STEPS[0];
+      patchGuidedCycle(activeThread.id, () => ({
+        ...cycle,
+        currentStepIndex: 0,
+        currentQuestion: fallback.question,
+        currentOptions: fallback.options,
+        isTerminal: fallback.is_terminal,
+      }));
+    } finally {
+      setGuidedBootstrapping(false);
+    }
+    return true;
   };
 
   const handleGuidedNext = async () => {
@@ -1024,9 +1113,6 @@ export default function AnalyzerApp() {
     patchGuidedCycle(activeThread.id, (current) =>
       current && current.id === activeGuidedCycle.id ? { ...current, answers: nextAnswers } : current
     );
-    setGuidedCustomDraft("");
-    setSelectedGuidedOption("");
-
     const nextStep = activeGuidedCycle.currentStepIndex + 1;
     if (nextStep >= activeGuidedCycle.maxSteps || activeGuidedCycle.isTerminal) {
       patchGuidedCycle(activeThread.id, (current) =>
@@ -1034,6 +1120,8 @@ export default function AnalyzerApp() {
           ? { ...current, answers: nextAnswers, isTerminal: true, currentQuestion: undefined, currentOptions: [] }
           : current
       );
+      setGuidedCustomDraft("");
+      setSelectedGuidedOption("");
       return;
     }
 
@@ -1045,6 +1133,8 @@ export default function AnalyzerApp() {
       },
       nextStep
     );
+    setGuidedCustomDraft("");
+    setSelectedGuidedOption("");
   };
 
   const handleDismissGuided = () => {
@@ -1058,10 +1148,37 @@ export default function AnalyzerApp() {
 
   const handleAnalyzeNow = async () => {
     if (!activeThread || !activeGuidedCycle) return;
-    const consolidated = buildConsolidatedRequirementText(activeGuidedCycle.baseRequirement, activeGuidedCycle.answers);
+    const pendingCustom = guidedCustomDraft.trim();
+    const pendingOption = selectedGuidedOption.trim();
+    const pendingAnswerText = pendingCustom || pendingOption;
+    const shouldAppendPending =
+      activeGuidedCycle.status === "guided" &&
+      !!activeGuidedCycle.currentQuestion &&
+      !!pendingAnswerText &&
+      !activeGuidedCycle.answers.some(
+        (entry) =>
+          entry.question === activeGuidedCycle.currentQuestion && entry.answer.trim() === pendingAnswerText
+      );
+    const answersForAnalysis = shouldAppendPending
+      ? [
+          ...activeGuidedCycle.answers,
+          {
+            question: activeGuidedCycle.currentQuestion || `Follow-up ${activeGuidedCycle.currentStepIndex + 1}`,
+            answer: pendingAnswerText,
+            source: pendingCustom ? "custom" : "option",
+          } satisfies GuidedAnswer,
+        ]
+      : activeGuidedCycle.answers;
+    const consolidated = buildConsolidatedRequirementText(activeGuidedCycle.baseRequirement, answersForAnalysis);
 
     patchGuidedCycle(activeThread.id, (current) =>
-      current && current.id === activeGuidedCycle.id ? { ...current, status: "analyzing" } : current
+      current && current.id === activeGuidedCycle.id
+        ? {
+            ...current,
+            status: "analyzing",
+            answers: answersForAnalysis,
+          }
+        : current
     );
     setLoading(true);
     setIsChatAnalyzing(true);
@@ -1134,9 +1251,11 @@ export default function AnalyzerApp() {
     }
     const messageAttachments = attachments;
     const scopeText = composer;
-    setComposer("");
-    setAttachments([]);
-    await startGuidedCycle(scopeText, messageAttachments);
+    const started = await startGuidedCycle(scopeText, messageAttachments);
+    if (started) {
+      setComposer("");
+      setAttachments([]);
+    }
   };
 
   const handleExportDocx = async () => {
@@ -2218,7 +2337,7 @@ export default function AnalyzerApp() {
                           {recentlyAddedToSidebar?.threadId === activeThreadId &&
                             recentlyAddedToSidebar?.messageId === message.id && (
                               <span className="mr-2 self-center text-[0.68rem] font-semibold text-signal chat-inline-toast">
-                                Added to summary sidebar
+                                Added to FSD
                               </span>
                             )}
                           <button
@@ -2252,10 +2371,33 @@ export default function AnalyzerApp() {
                 )}
               </div>
 
-              <div className={`chat-composer-wrap ${isDiscussionIdle ? "chat-composer-wrap-highlight" : ""}`}>
+              <div
+                className={`chat-composer-wrap ${isDiscussionIdle ? "chat-composer-wrap-highlight" : ""} ${
+                  isGuidedInputLocked ? "chat-composer-wrap-guided" : ""
+                }`}
+              >
                 {activeGuidedCycle &&
+                  !guidedBootstrapping &&
                   (activeGuidedCycle.status === "guided" || activeGuidedCycle.status === "cancelled") && (
                     <div className="guided-card guided-card-in-composer">
+                      {(() => {
+                        const isGuidedStepLoading =
+                          activeGuidedCycle.status === "guided" &&
+                          guidedLoading &&
+                          !activeGuidedCycle.currentQuestion &&
+                          (activeGuidedCycle.currentOptions?.length || 0) === 0 &&
+                          !activeGuidedCycle.isTerminal;
+                        const isFinalGuidedStep =
+                          activeGuidedCycle.status === "guided" &&
+                          (activeGuidedCycle.isTerminal ||
+                            activeGuidedCycle.currentStepIndex >= activeGuidedCycle.maxSteps - 1);
+                        const isNextThinking =
+                          activeGuidedCycle.status === "guided" &&
+                          guidedLoading &&
+                          !isFinalGuidedStep &&
+                          !isGuidedStepLoading;
+                        return (
+                          <>
                       <div className="guided-card-head">
                         <p className="guided-kicker">
                           Guided Follow-up • Step{" "}
@@ -2266,12 +2408,25 @@ export default function AnalyzerApp() {
                           Dismiss (Esc)
                         </button>
                       </div>
-                      {activeGuidedCycle.status === "cancelled" ? (
+                      {isGuidedStepLoading ? (
+                        <div className="guided-loading-stage" aria-live="polite">
+                          <span className="guided-loading-icon" aria-hidden="true" />
+                          <p className="guided-loading-text">Preparing next follow-up question...</p>
+                        </div>
+                      ) : activeGuidedCycle.status === "cancelled" ? (
                         <p className="guided-cancel-note">
                           Guided questions were dismissed. You can still analyze using collected context.
                         </p>
+                      ) : activeGuidedCycle.isTerminal && !activeGuidedCycle.currentQuestion ? (
+                        <p className="guided-cancel-note">
+                          Follow-up context is complete. Click <strong>Analyze now</strong> to generate the final
+                          response.
+                        </p>
                       ) : (
-                        <>
+                        <div
+                          key={`${activeGuidedCycle.currentStepIndex}-${activeGuidedCycle.currentQuestion || "step"}`}
+                          className="guided-step-stage"
+                        >
                           <p className="guided-question">
                             {activeGuidedCycle.currentQuestion || "Loading follow-up question..."}
                           </p>
@@ -2308,82 +2463,110 @@ export default function AnalyzerApp() {
                               }}
                             />
                           </div>
-                        </>
+                        </div>
                       )}
                       <div className="guided-actions">
-                        {activeGuidedCycle.status === "guided" && (
+                        {activeGuidedCycle.status === "guided" && isFinalGuidedStep && !isGuidedStepLoading && (
+                          <p className="guided-final-note">Click Analyze now to generate the final response.</p>
+                        )}
+                        {activeGuidedCycle.status === "guided" && !isFinalGuidedStep && !isGuidedStepLoading && (
                           <button
-                            className="guided-next-btn"
+                            className={`guided-next-btn ${isNextThinking ? "guided-next-thinking-shift" : ""}`}
                             onClick={() => void handleGuidedNext()}
                             disabled={guidedLoading}
                           >
-                            {guidedLoading ? "Loading..." : "Next"}
+                            {guidedLoading ? (
+                              <span className="guided-next-loading">
+                                <span className="guided-next-spinner" aria-hidden="true" />
+                                <span>Thinking</span>
+                              </span>
+                            ) : (
+                              "Next"
+                            )}
                           </button>
                         )}
-                        <button
-                          className="guided-analyze-btn"
-                          onClick={() => void handleAnalyzeNow()}
-                          disabled={loading || !activeGuidedCycle.baseRequirement}
-                        >
-                          Analyze now
-                        </button>
+                        {!isNextThinking && (
+                          <button
+                            className="guided-analyze-btn"
+                            onClick={() => void handleAnalyzeNow()}
+                            disabled={loading || guidedLoading || !activeGuidedCycle.baseRequirement}
+                          >
+                            Analyze now
+                          </button>
+                        )}
                       </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   )}
-                <div className="chat-attachments-list">
-                  {attachments.map((item) => (
-                    <span key={item.id} className="attachment-chip">
-                      {item.name}
+                {isGuidedInputLocked ? (
+                  <div className="chat-composer-backplate" aria-hidden="true" />
+                ) : (
+                  <>
+                    <div className="chat-attachments-list">
+                      {attachments.map((item) => (
+                        <span key={item.id} className="attachment-chip">
+                          {item.name}
+                          <button
+                            className="ml-2 text-obsidian/60"
+                            onClick={() => removeAttachment(item.id)}
+                            aria-label={`Remove ${item.name}`}
+                          >
+                            x
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                    <div className="chat-composer" role="group" aria-label="Message composer">
+                      <label className="composer-attach">
+                        +
+                        <input
+                          type="file"
+                          className="hidden"
+                          multiple
+                          onChange={(event) => handleAttachFiles(event.target.files)}
+                        />
+                      </label>
+                      <textarea
+                        ref={composerRef}
+                        value={composer}
+                        onChange={(event) => setComposer(event.target.value)}
+                        className="composer-input"
+                        placeholder="Discuss scope, requirements, assumptions, and constraints..."
+                        disabled={guidedBootstrapping}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            if (!loading) void handleSend();
+                          }
+                        }}
+                      />
                       <button
-                        className="ml-2 text-obsidian/60"
-                        onClick={() => removeAttachment(item.id)}
-                        aria-label={`Remove ${item.name}`}
+                        onClick={() => void handleSend()}
+                        className="composer-send"
+                        disabled={loading || guidedBootstrapping || (!composer.trim() && attachments.length === 0)}
                       >
-                        x
+                        {guidedBootstrapping ? (
+                          <>
+                            <span className="composer-thinking-icon" aria-hidden="true">
+                              <span className="composer-thinking-spinner" />
+                            </span>
+                            <span>Thinking</span>
+                          </>
+                        ) : (
+                          <>
+                            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M3 11.5 21 3l-8.5 18-2.2-6.3L3 11.5Z" />
+                              <path d="M10.3 14.7 21 3" />
+                            </svg>
+                            <span>Send</span>
+                          </>
+                        )}
                       </button>
-                    </span>
-                  ))}
-                </div>
-                <div className="chat-composer" role="group" aria-label="Message composer">
-                  <label className="composer-attach">
-                    +
-                    <input
-                      type="file"
-                      className="hidden"
-                      multiple
-                      onChange={(event) => handleAttachFiles(event.target.files)}
-                    />
-                  </label>
-                  <textarea
-                    ref={composerRef}
-                    value={composer}
-                    onChange={(event) => setComposer(event.target.value)}
-                    className="composer-input"
-                    placeholder={
-                      activeGuidedCycle?.status === "guided"
-                        ? "Use guided follow-up card above, or click Analyze now..."
-                        : "Discuss scope, requirements, assumptions, and constraints..."
-                    }
-                    disabled={activeGuidedCycle?.status === "guided"}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" && !event.shiftKey) {
-                        event.preventDefault();
-                        if (!loading) void handleSend();
-                      }
-                    }}
-                  />
-                  <button
-                    onClick={() => void handleSend()}
-                    className="composer-send"
-                    disabled={loading || activeGuidedCycle?.status === "guided" || (!composer.trim() && attachments.length === 0)}
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
-                      <path d="M3 11.5 21 3l-8.5 18-2.2-6.3L3 11.5Z" />
-                      <path d="M10.3 14.7 21 3" />
-                    </svg>
-                    <span>Send</span>
-                  </button>
-                </div>
+                    </div>
+                  </>
+                )}
                 <p className="mt-2 text-center text-[0.7rem] text-obsidian/55">
                   Responses can be inaccurate; please double check before finalizing.
                 </p>
@@ -2420,7 +2603,7 @@ export default function AnalyzerApp() {
 
           <div className={`summary-metrics ${isCoverageEmpty ? "is-empty" : ""}`}>
             <div className="summary-metrics-head">
-              <p className="summary-metrics-title">Overall FSD Coverage</p>
+              <p className="summary-metrics-title">Overall Coverage</p>
               <p className="summary-metrics-subtitle">Data from finalized points added to FSD.</p>
             </div>
             {isCoverageEmpty ? (
@@ -2490,67 +2673,91 @@ export default function AnalyzerApp() {
                 </div>
               </div>
             ) : (
-              activeFsdSelections.map((item) => (
-                <div key={item.id} className="summary-card">
-                  {(() => {
+              <>
+                {sortedFsdSelections.map((item) => {
                     const isExpanded = expandedSummaryItemIds.has(item.id);
-                    const shouldCollapse = item.response.length > 260;
                     return (
-                      <>
-                  <div className="flex items-center justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
-                      {item.classifications.length > 0 ? (
-                        item.classifications.map((classification, idx) => (
-                          <span key={`${item.id}-class-${idx}`} className="badge bg-signal/20 text-signal">
-                            {classification}
-                          </span>
-                        ))
-                      ) : (
-                        <span className="badge bg-obsidian/10 text-obsidian">Analysis</span>
-                      )}
-                    </div>
-                    <button
-                      className="history-thread-link delete"
-                      onClick={() => handleRemoveFromFsd(item.id, item.messageId)}
-                    >
-                      Remove
-                    </button>
-                  </div>
-                  <div className="mt-3 rounded-2xl border border-slate/30 bg-white/80 p-3">
-                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-obsidian/55">
-                      Requirement
-                    </p>
-                    <div className="mt-2 grid gap-1.5 text-sm text-obsidian/75">
-                      {item.requirements.length > 0 ? (
-                        item.requirements.map((requirement, idx) => (
-                          <p key={`${item.id}-req-${idx}`}>{requirement}</p>
-                        ))
-                      ) : (
-                        <p>No requirement extracted</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="mt-2 rounded-2xl border border-slate/30 bg-white/80 p-3">
-                    <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-obsidian/55">
-                      Analysis
-                    </p>
-                    <p className={`mt-2 text-sm text-obsidian/75 summary-analysis-text ${!isExpanded && shouldCollapse ? "is-collapsed" : ""}`}>
-                      {item.response}
-                    </p>
-                    {shouldCollapse && (
-                      <button
-                        className="summary-analysis-toggle"
-                        onClick={() => toggleSummaryItemExpansion(item.id)}
-                      >
-                        {isExpanded ? "Show less" : "Show more"}
-                      </button>
-                    )}
-                  </div>
-                      </>
+                      <div key={item.id} className="summary-card">
+                        <div className="summary-card-head">
+                          <div className="summary-card-title-wrap">
+                            <p className="summary-card-title">
+                              {item.requirementText || "Requirement captured from discussion"}
+                            </p>
+                            <p className="summary-card-meta">
+                              {formatDateTime(item.createdAt)} • Effort: {item.effort}
+                            </p>
+                          </div>
+                          <div className="summary-actions">
+                            <button
+                              className="summary-expand-link"
+                              onClick={() => toggleSummaryItemExpansion(item.id)}
+                              aria-label={isExpanded ? "Collapse FSD point" : "Expand FSD point"}
+                              title={isExpanded ? "Collapse" : "Expand"}
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                {isExpanded ? <path d="m7 14 5-5 5 5" /> : <path d="m7 10 5 5 5-5" />}
+                              </svg>
+                            </button>
+                            <button
+                              className="summary-remove-link"
+                              onClick={() => handleRemoveFromFsd(item.id, item.messageId)}
+                              aria-label="Remove FSD point"
+                              title="Remove"
+                            >
+                              <svg
+                                viewBox="0 0 24 24"
+                                aria-hidden="true"
+                                className="h-3.5 w-3.5"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="2"
+                              >
+                                <path d="M4 7h16" />
+                                <path d="M9 7V5h6v2" />
+                                <path d="M7 7l1 12h8l1-12" />
+                                <path d="M10 11v5M14 11v5" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+
+                        {isExpanded && (
+                          <>
+                            {item.clarifications.length > 0 && (
+                              <div className="summary-section-box">
+                                <p className="summary-section-label">Clarifications</p>
+                                <ul className="summary-clarification-list">
+                                  {item.clarifications.map((entry, idx) => (
+                                    <li key={`${item.id}-clar-${idx}`}>
+                                      <span className="summary-clarification-q">{entry.question}</span>
+                                      <span className="summary-clarification-a">{entry.answer}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            <div className="summary-section-box">
+                              <p className="summary-section-label">
+                                {item.classifications[0]
+                                  ? `Analysis • ${item.classifications[0]}`
+                                  : "Analysis"}
+                              </p>
+                              <p className="summary-analysis-text">{item.response}</p>
+                            </div>
+                          </>
+                        )}
+                      </div>
                     );
-                  })()}
-                </div>
-              ))
+                  })}
+              </>
             )}
           </div>
 
