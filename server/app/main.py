@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -8,6 +8,9 @@ import io
 import html
 import re
 import json
+import threading
+import time
+import uuid
 
 from .confluence import (
     create_child_page,
@@ -57,12 +60,16 @@ from .schemas import (
     ConfluenceSaveRequest,
     ConfluenceSaveTextRequest,
     ConfluenceSaveResponse,
+    IngestStartResponse,
+    IngestStatusResponse,
 )
 from .baseline_store import compare_to_baseline, load_baseline, save_baseline
 
 
 app = FastAPI(title="SFRA AI Agent API", version="0.2.0")
 chroma = ChromaService()
+ingest_jobs: dict[str, dict] = {}
+ingest_jobs_lock = threading.Lock()
 
 FALLBACK_FOLLOWUP_STEPS = [
     {
@@ -252,6 +259,115 @@ def _generate_followup_step(requirement: str, history: list[dict], step_index: i
         )
 
 
+def _set_ingest_job(job_id: str, **updates) -> None:
+    with ingest_jobs_lock:
+        current = ingest_jobs.get(job_id)
+        if not current:
+            return
+        current.update(updates)
+
+
+def _run_confluence_ingest(progress_cb=None) -> dict:
+    space_keys = [key.strip() for key in settings.confluence_space_keys.split(",") if key.strip()]
+    if not space_keys:
+        raise ValueError("CONFLUENCE_SPACE_KEYS is not set")
+
+    if progress_cb:
+        progress_cb(stage="Collecting Confluence pages...", progress=5)
+
+    page_ids = search_pages(space_keys, settings.confluence_cql_extra.strip())
+    total_pages = len(page_ids)
+    if not page_ids:
+        if progress_cb:
+            progress_cb(
+                stage="No pages found for configured Confluence spaces.",
+                progress=100,
+                pages_total=0,
+                pages_processed=0,
+                pages_indexed=0,
+                pages_skipped=0,
+                chunks=0,
+            )
+        return {"pages": 0, "chunks": 0, "indexed": 0, "skipped": 0}
+
+    total_chunks = 0
+    indexed_pages = 0
+    skipped_pages = 0
+    for idx, page_id in enumerate(page_ids, start=1):
+        page = fetch_page(page_id)
+        text = page_to_text(page)
+        if chroma.should_skip("confluence", page.page_id, text):
+            skipped_pages += 1
+        else:
+            doc = IngestDocument(
+                source="confluence",
+                source_id=page.page_id,
+                title=page.title,
+                url=page.url,
+                space_key=page.space_key,
+                updated_at=page.updated_at,
+                text=text,
+            )
+            total_chunks += upsert_document_chunks(chroma, doc, task_type="retrieval_document")
+            indexed_pages += 1
+
+        if progress_cb:
+            page_progress = int((idx / total_pages) * 88)
+            progress_cb(
+                stage=f"Indexed {idx}/{total_pages} pages...",
+                progress=min(98, 10 + page_progress),
+                pages_total=total_pages,
+                pages_processed=idx,
+                pages_indexed=indexed_pages,
+                pages_skipped=skipped_pages,
+                chunks=total_chunks,
+            )
+
+    if progress_cb:
+        progress_cb(
+            stage="Ingestion completed.",
+            progress=100,
+            pages_total=total_pages,
+            pages_processed=total_pages,
+            pages_indexed=indexed_pages,
+            pages_skipped=skipped_pages,
+            chunks=total_chunks,
+        )
+    return {
+        "pages": total_pages,
+        "chunks": total_chunks,
+        "indexed": indexed_pages,
+        "skipped": skipped_pages,
+    }
+
+
+def _run_ingest_job(job_id: str) -> None:
+    _set_ingest_job(job_id, status="running")
+    try:
+        result = _run_confluence_ingest(progress_cb=lambda **kwargs: _set_ingest_job(job_id, **kwargs))
+        _set_ingest_job(
+            job_id,
+            status="completed",
+            progress=100,
+            stage="Ingestion completed.",
+            pages_total=result["pages"],
+            pages_processed=result["pages"],
+            pages_indexed=result["indexed"],
+            pages_skipped=result["skipped"],
+            chunks=result["chunks"],
+            finished_at=time.time(),
+            error=None,
+        )
+    except Exception as exc:
+        _set_ingest_job(
+            job_id,
+            status="failed",
+            stage="Ingestion failed.",
+            finished_at=time.time(),
+            error=str(exc),
+        )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -410,32 +526,46 @@ def generate_fsd_docx_text_endpoint(payload: GenerateFsdTextRequest):
 
 @app.post("/ingest-confluence")
 def ingest_confluence():
-    space_keys = [key.strip() for key in settings.confluence_space_keys.split(",") if key.strip()]
-    if not space_keys:
-        raise HTTPException(status_code=400, detail="CONFLUENCE_SPACE_KEYS is not set")
+    try:
+        result = _run_confluence_ingest()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to ingest Confluence content: {exc}") from exc
+    return {"pages": result["pages"], "chunks": result["chunks"]}
 
-    page_ids = search_pages(space_keys, settings.confluence_cql_extra.strip())
-    if not page_ids:
-        return {"pages": 0, "chunks": 0}
 
-    total_chunks = 0
-    for page_id in page_ids:
-        page = fetch_page(page_id)
-        text = page_to_text(page)
-        if chroma.should_skip("confluence", page.page_id, text):
-            continue
-        doc = IngestDocument(
-            source="confluence",
-            source_id=page.page_id,
-            title=page.title,
-            url=page.url,
-            space_key=page.space_key,
-            updated_at=page.updated_at,
-            text=text,
-        )
-        total_chunks += upsert_document_chunks(chroma, doc, task_type="retrieval_document")
+@app.post("/ingest-confluence/start", response_model=IngestStartResponse)
+def ingest_confluence_start(background_tasks: BackgroundTasks):
+    job_id = str(uuid.uuid4())
+    started_at = time.time()
+    with ingest_jobs_lock:
+        ingest_jobs[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "stage": "Queued for ingestion.",
+            "progress": 0,
+            "pages_total": 0,
+            "pages_processed": 0,
+            "pages_indexed": 0,
+            "pages_skipped": 0,
+            "chunks": 0,
+            "started_at": started_at,
+            "finished_at": None,
+            "error": None,
+        }
+    background_tasks.add_task(_run_ingest_job, job_id)
+    return IngestStartResponse(job_id=job_id, status="queued")
 
-    return {"pages": len(page_ids), "chunks": total_chunks}
+
+@app.get("/ingest-confluence/status/{job_id}", response_model=IngestStatusResponse)
+def ingest_confluence_status(job_id: str):
+    with ingest_jobs_lock:
+        job = ingest_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Ingestion job not found")
+        payload = dict(job)
+    return IngestStatusResponse(**payload)
 
 
 @app.get("/confluence/spaces", response_model=list[ConfluenceSpace])

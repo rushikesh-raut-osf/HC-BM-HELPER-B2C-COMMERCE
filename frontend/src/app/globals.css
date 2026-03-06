@@ -81,6 +81,34 @@ body {
   padding-right: 0.25rem;
 }
 
+.top-nav-notice {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: min(52vw, 680px);
+  pointer-events: auto;
+}
+
+.top-nav-notice-text {
+  @apply rounded-full border border-signal/25 bg-white/90 px-3 py-1 text-center text-[0.7rem] font-semibold text-obsidian/70;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.12);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  max-width: 100%;
+}
+
+.top-nav-notice-text > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.top-nav-notice-close {
+  @apply inline-flex h-5 w-5 items-center justify-center rounded-full border border-obsidian/15 bg-white text-[0.7rem] leading-none text-obsidian/65 transition-colors hover:text-obsidian;
+  flex-shrink: 0;
+}
+
 .top-nav .icon-chip {
   @apply border-signal/20 bg-white/80;
 }
@@ -723,7 +751,7 @@ body {
 .chat-bubble.user {
   justify-self: end;
   @apply text-white;
-  background: linear-gradient(135deg, #2563eb 0%, #1f7ae0 55%, #14b8a6 100%);
+  background: linear-gradient(135deg, #2f6fdd 0%, #2c82d7 52%, #24b0bc 100%);
   border-color: rgba(37, 99, 235, 0.35);
 }
 
@@ -961,6 +989,24 @@ body {
 
 .analysis-response-label {
   @apply text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-signal;
+}
+
+.analysis-reasoning-list {
+  margin-top: 0.55rem;
+  padding-left: 1rem;
+  display: grid;
+  gap: 0.3rem;
+  list-style: disc;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  color: rgba(11, 18, 32, 0.72);
+}
+
+.analysis-inline-link {
+  color: rgba(37, 99, 235, 0.9);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .followup-row {
@@ -1251,6 +1297,10 @@ body {
   width: min(640px, 95vw);
 }
 
+.datasource-modal {
+  width: min(860px, 96vw);
+}
+
 .workspace-modal-header {
   @apply flex items-center justify-between border-b border-obsidian/10 px-5 py-4;
 }
@@ -1271,6 +1321,94 @@ body {
   @apply flex items-center justify-end gap-2 border-t border-obsidian/10 px-5 py-4;
 }
 
+.datasource-section {
+  @apply rounded-2xl border border-obsidian/10 bg-white/75 p-3;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.datasource-section-head {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.datasource-list {
+  display: grid;
+  gap: 0.65rem;
+  max-height: 240px;
+  overflow: auto;
+  padding-right: 0.25rem;
+}
+
+.datasource-row {
+  @apply rounded-xl border border-obsidian/10 bg-white p-2;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.datasource-note-input {
+  min-height: 68px;
+  resize: vertical;
+}
+
+.datasource-remove-btn {
+  @apply inline-flex w-fit rounded-full border border-rose/30 bg-rose/10 px-2.5 py-1 text-xs font-semibold text-rose transition-colors hover:bg-rose/20;
+}
+
+.datasource-add-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 0.45rem;
+}
+
+.datasource-add-btn {
+  @apply rounded-full border border-signal/25 bg-signal/10 px-3 py-2 text-xs font-semibold text-signal transition-colors hover:bg-signal/20;
+}
+
+.datasource-ingest-progress {
+  @apply rounded-2xl border border-signal/20 bg-white/85 p-3;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.datasource-ingest-head {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.datasource-ingest-title {
+  @apply text-xs font-semibold uppercase tracking-[0.1em] text-obsidian/75;
+}
+
+.datasource-ingest-estimate {
+  @apply text-[0.72rem] text-obsidian/60;
+}
+
+.datasource-progress-track {
+  width: 100%;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.1);
+  overflow: hidden;
+}
+
+.datasource-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.95), rgba(20, 184, 166, 0.9));
+  box-shadow: 0 0 12px rgba(37, 99, 235, 0.25);
+  transition: width 420ms ease;
+}
+
+.datasource-ingest-note {
+  @apply text-[0.72rem] font-medium text-obsidian/65;
+}
+
+.datasource-ingest-jobid {
+  @apply text-[0.68rem] font-semibold text-obsidian/55;
+}
+
 @media (max-width: 1279px) {
   .workspace-grid {
     grid-template-columns: 240px minmax(0, 1fr) 380px;
@@ -1288,6 +1426,10 @@ body {
 
   .top-nav {
     padding: 0.25rem 0.9rem;
+  }
+
+  .top-nav-notice {
+    display: none;
   }
 
   .workspace-grid,

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import MDEditor from "@uiw/react-md-editor";
 import {
   ConfluenceFolder,
+  IngestStatusResponse,
   ConfluenceSpace,
   FollowupStepOption,
   FollowupStepResponse,
@@ -17,6 +18,8 @@ import {
   generateFsd,
   generateFsdDocx,
   generateFsdDocxFromText,
+  getConfluenceIngestStatus,
+  startConfluenceIngest,
   saveFsdToConfluence,
   saveFsdTextToConfluence,
 } from "@/lib/api";
@@ -52,7 +55,6 @@ type ChatMessage = {
     why: string;
     confidence: number;
     references: Array<{ title: string; url: string }>;
-    finalRequirement: string;
   };
   attachments?: AttachmentMeta[];
   analysisResults?: GapResult[];
@@ -83,6 +85,12 @@ type ChatThread = {
   messages: ChatMessage[];
 };
 
+type DataSourceLink = {
+  id: string;
+  url: string;
+  note: string;
+};
+
 const ANALYSIS_STEPS = [
   "Analyzing scope",
   "Mapping Baseline Requirements",
@@ -97,6 +105,34 @@ const STARTER_PROMPTS = [
 ];
 
 const GUIDED_MAX_STEPS = 3;
+const DATA_SOURCE_STORAGE_KEY = "scout.dataSources.v1";
+const DEFAULT_BASELINE_LINKS: DataSourceLink[] = [
+  {
+    id: crypto.randomUUID(),
+    url: "https://help.salesforce.com/s/articleView?id=cc.b2c_getting_started.htm&type=5",
+    note: "B2C Commerce overview, include TOC hierarchy for baseline understanding.",
+  },
+  {
+    id: crypto.randomUUID(),
+    url: "https://sfcclearning.com/infocenter/",
+    note: "Secondary context only; use for supporting examples.",
+  },
+  {
+    id: crypto.randomUUID(),
+    url: "https://developer.salesforce.com/docs/commerce/sfra/guide/sfra-feature-list.html",
+    note: "Primary SFRA feature coverage baseline.",
+  },
+  {
+    id: crypto.randomUUID(),
+    url: "https://help.salesforce.com/s/articleView?id=cc.b2c_merchandising_your_site.htm&type=5",
+    note: "Business Manager configuration baseline.",
+  },
+  {
+    id: crypto.randomUUID(),
+    url: "https://www.rhino-inquisitor.com/salesforce-b2c-commerce-cloud-documentation/",
+    note: "Supplementary overview only.",
+  },
+];
 
 const FALLBACK_GUIDED_STEPS: FollowupStepResponse[] = [
   {
@@ -165,8 +201,10 @@ const splitRequirementContext = (text: string) => {
 };
 
 const buildConsolidatedRequirementText = (baseRequirement: string, answers: GuidedAnswer[]) => {
-  const lines = [`Requirement: ${ensureSentence(baseRequirement)}`];
-  if (answers.length) {
+  const lines: string[] = [];
+  if (answers.length === 0) {
+    lines.push(`Requirement: ${ensureSentence(baseRequirement)}`);
+  } else {
     lines.push("Clarifications:");
     answers.forEach((entry, index) => {
       lines.push(`Q${index + 1}: ${entry.question}`);
@@ -175,6 +213,7 @@ const buildConsolidatedRequirementText = (baseRequirement: string, answers: Guid
   }
   const summary = answers.map((entry) => entry.answer.trim()).filter(Boolean).join(" ");
   if (summary) {
+    lines.push("");
     lines.push(`Final context summary: ${summary}`);
   }
   return lines.join("\n");
@@ -205,6 +244,34 @@ const classifyTone = (label: string) => {
   if (normalized.includes("partial")) return "bg-amber/25 text-amber";
   if (normalized.includes("open")) return "bg-rose/20 text-rose";
   return "bg-signal/20 text-signal";
+};
+
+const confidenceToPercent = (value: number) => {
+  if (!Number.isFinite(value)) return null;
+  if (value <= 1) return Math.max(0, Math.min(100, Math.round(value * 100)));
+  return Math.max(0, Math.min(100, Math.round(value)));
+};
+
+const classificationBadgeLabel = (classification: string, confidence: number) => {
+  const percent = confidenceToPercent(confidence);
+  if (!classification.toLowerCase().includes("partial") || percent === null) return classification;
+  return `${classification} (${percent}%)`;
+};
+
+const looksLikeSfraReference = (source: { title: string; url: string }) => {
+  const token = `${source.title} ${source.url}`.toLowerCase();
+  return (
+    token.includes("sfra") ||
+    token.includes("salesforce") ||
+    token.includes("b2c-commerce") ||
+    token.includes("commerce-cloud")
+  );
+};
+
+const getReasoningReferences = (sources: Array<{ title: string; url: string }>) => {
+  const sfraReference = sources.find((source) => looksLikeSfraReference(source));
+  const projectReference = sources.find((source) => source !== sfraReference);
+  return { sfraReference, projectReference };
 };
 
 const statusCounts = (results: GapResult[]) => {
@@ -312,6 +379,7 @@ export default function AnalyzerApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [isDataSourceOpen, setIsDataSourceOpen] = useState(false);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(true);
   const [isConfluenceModalOpen, setIsConfluenceModalOpen] = useState(false);
   const [confluenceLoading, setConfluenceLoading] = useState(false);
@@ -337,6 +405,18 @@ export default function AnalyzerApp() {
   } | null>(null);
   const [threadSearch, setThreadSearch] = useState("");
   const [expandedAnalysisKeys, setExpandedAnalysisKeys] = useState<Set<string>>(new Set());
+  const [baselineLinks, setBaselineLinks] = useState<DataSourceLink[]>(DEFAULT_BASELINE_LINKS);
+  const [newBaselineUrl, setNewBaselineUrl] = useState("");
+  const [newBaselineNote, setNewBaselineNote] = useState("");
+  const [projectConfluenceUrl, setProjectConfluenceUrl] = useState("");
+  const [projectSecurityToken, setProjectSecurityToken] = useState("");
+  const [isIngestingDataSources, setIsIngestingDataSources] = useState(false);
+  const [dataSourceError, setDataSourceError] = useState("");
+  const [dataSourceNotice, setDataSourceNotice] = useState("");
+  const [ingestProgress, setIngestProgress] = useState(0);
+  const [ingestStartedAt, setIngestStartedAt] = useState<number | null>(null);
+  const [ingestStatusText, setIngestStatusText] = useState("");
+  const [ingestJobId, setIngestJobId] = useState<string | null>(null);
 
   const historyDrawerRef = useRef<HTMLDivElement | null>(null);
   const summaryDrawerRef = useRef<HTMLDivElement | null>(null);
@@ -344,6 +424,7 @@ export default function AnalyzerApp() {
   const profileMenuRef = useRef<HTMLDivElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const ingestStatusPollRef = useRef<number | null>(null);
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) ?? threads[0],
@@ -428,11 +509,45 @@ export default function AnalyzerApp() {
         setIsConfluenceModalOpen(false);
         setIsOnboardingOpen(false);
         setIsHelpOpen(false);
+        setIsDataSourceOpen(false);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeGuidedCycle, activeThread]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DATA_SOURCE_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        baselineLinks?: DataSourceLink[];
+        projectConfluenceUrl?: string;
+      };
+      if (parsed.baselineLinks?.length) {
+        setBaselineLinks(
+          parsed.baselineLinks.map((item) => ({
+            id: item.id || crypto.randomUUID(),
+            url: item.url || "",
+            note: item.note || "",
+          }))
+        );
+      }
+      if (typeof parsed.projectConfluenceUrl === "string") {
+        setProjectConfluenceUrl(parsed.projectConfluenceUrl);
+      }
+    } catch {
+      // Ignore storage parse errors and continue with defaults.
+    }
+  }, []);
+
+  useEffect(() => {
+    const payload = {
+      baselineLinks,
+      projectConfluenceUrl,
+    };
+    localStorage.setItem(DATA_SOURCE_STORAGE_KEY, JSON.stringify(payload));
+  }, [baselineLinks, projectConfluenceUrl]);
 
   useEffect(() => {
     chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: "smooth" });
@@ -520,6 +635,22 @@ export default function AnalyzerApp() {
       cleanupSummary?.();
     };
   }, [isMobileHistoryOpen, isMobileSummaryOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (ingestStatusPollRef.current) {
+        window.clearInterval(ingestStatusPollRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!actionNotice) return;
+    const timeout = window.setTimeout(() => {
+      setActionNotice("");
+    }, 5000);
+    return () => window.clearTimeout(timeout);
+  }, [actionNotice]);
 
   const handleSignOut = async () => {
     await fetch("/api/gate/logout", { method: "POST" });
@@ -811,17 +942,6 @@ export default function AnalyzerApp() {
     };
 
     const nextAnswers = [...activeGuidedCycle.answers, answer];
-    setThreadMessages(activeThread.id, (messages) => [
-      ...messages,
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        kind: "guided_answer",
-        cycleId: activeGuidedCycle.id,
-        createdAt: new Date().toISOString(),
-        text: `Clarification: ${answer.question}\n${answer.answer}`,
-      },
-    ]);
 
     patchGuidedCycle(activeThread.id, (current) =>
       current && current.id === activeGuidedCycle.id ? { ...current, answers: nextAnswers } : current
@@ -871,6 +991,17 @@ export default function AnalyzerApp() {
     setActionNotice("");
 
     try {
+      setThreadMessages(activeThread.id, (messages) => [
+        ...messages,
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          kind: "guided_answer",
+          cycleId: activeGuidedCycle.id,
+          createdAt: new Date().toISOString(),
+          text: consolidated,
+        },
+      ]);
       const payload = await analyzeSingleRequirement(consolidated);
       const primary = payload.results[0];
       const references = primary ? getSources(primary).slice(0, 3) : [];
@@ -880,7 +1011,7 @@ export default function AnalyzerApp() {
         kind: "analysis_result",
         cycleId: activeGuidedCycle.id,
         createdAt: new Date().toISOString(),
-        text: primary?.rationale || "Analysis completed.",
+        text: primary ? `Analysis completed: ${primary.classification}.` : "Analysis completed.",
         analysisResults: payload.results,
         detailedResult: primary
           ? {
@@ -888,7 +1019,6 @@ export default function AnalyzerApp() {
               why: primary.rationale,
               confidence: primary.confidence,
               references,
-              finalRequirement: consolidated,
             }
           : undefined,
       };
@@ -1103,6 +1233,106 @@ export default function AnalyzerApp() {
     }
   };
 
+  const handleAddBaselineLink = () => {
+    const url = newBaselineUrl.trim();
+    if (!url) {
+      setDataSourceError("Source URL is required.");
+      return;
+    }
+    setBaselineLinks((prev) => [...prev, { id: crypto.randomUUID(), url, note: newBaselineNote.trim() }]);
+    setNewBaselineUrl("");
+    setNewBaselineNote("");
+    setDataSourceError("");
+  };
+
+  const handleRemoveBaselineLink = (id: string) => {
+    setBaselineLinks((prev) => prev.filter((item) => item.id !== id));
+  };
+
+  const handleUpdateBaselineLink = (id: string, field: "url" | "note", value: string) => {
+    setBaselineLinks((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+    );
+  };
+
+  const handleIngestDataSources = async () => {
+    if (ingestStatusPollRef.current) window.clearInterval(ingestStatusPollRef.current);
+    setIsIngestingDataSources(true);
+    setDataSourceError("");
+    setDataSourceNotice("");
+    setIngestProgress(0);
+    setIngestStartedAt(Date.now());
+    setIngestStatusText("Queued for ingestion...");
+    setActionNotice("Ingestion started.");
+    try {
+      const started = await startConfluenceIngest();
+      setIngestJobId(started.job_id);
+      const pollStatus = async () => {
+        const status = await getConfluenceIngestStatus(started.job_id);
+        setIngestStatusText(status.stage || "");
+        setIngestProgress(Math.max(0, Math.min(100, Math.round(status.progress || 0))));
+        if (status.started_at) {
+          setIngestStartedAt(Math.round(status.started_at * 1000));
+        }
+
+        if (status.status === "completed") {
+          if (ingestStatusPollRef.current) {
+            window.clearInterval(ingestStatusPollRef.current);
+            ingestStatusPollRef.current = null;
+          }
+          handleIngestCompleted(status);
+          return;
+        }
+        if (status.status === "failed") {
+          if (ingestStatusPollRef.current) {
+            window.clearInterval(ingestStatusPollRef.current);
+            ingestStatusPollRef.current = null;
+          }
+          throw new Error(status.error || "Ingestion failed.");
+        }
+      };
+
+      const handleIngestCompleted = (status: IngestStatusResponse) => {
+        setIngestProgress(100);
+        setIngestStatusText("Ingestion completed.");
+        setDataSourceNotice(
+          `Ingestion completed: ${status.pages_total} pages scanned, ${status.pages_indexed} indexed, ${status.pages_skipped} skipped, ${status.chunks} chunks stored.`
+        );
+        setActionNotice(
+          `Data ingestion completed: ${status.pages_indexed}/${status.pages_total} pages indexed, ${status.chunks} chunks.`
+        );
+        setIsIngestingDataSources(false);
+      };
+
+      try {
+        await pollStatus();
+      } catch (pollError) {
+        setIsIngestingDataSources(false);
+        throw pollError;
+      }
+
+      ingestStatusPollRef.current = window.setInterval(() => {
+        void pollStatus().catch((pollError) => {
+          if (ingestStatusPollRef.current) {
+            window.clearInterval(ingestStatusPollRef.current);
+            ingestStatusPollRef.current = null;
+          }
+          setIsIngestingDataSources(false);
+          setIngestStatusText("Ingestion failed.");
+          setDataSourceError(pollError instanceof Error ? pollError.message : "Unable to ingest sources.");
+        });
+      }, 1500);
+    } catch (err) {
+      if (ingestStatusPollRef.current) {
+        window.clearInterval(ingestStatusPollRef.current);
+        ingestStatusPollRef.current = null;
+      }
+      setIngestStatusText("Ingestion failed. Please review the error and retry.");
+      setDataSourceError(err instanceof Error ? err.message : "Unable to ingest sources.");
+      setIsIngestingDataSources(false);
+    }
+  };
+
   return (
     <main className="workspace-shell min-h-screen text-obsidian">
       <header className="top-nav glass-bar" role="navigation" aria-label="Main navigation">
@@ -1120,6 +1350,21 @@ export default function AnalyzerApp() {
             <span className="sr-only">SFRA AI Agent Requirements Intelligence</span>
           </div>
         </div>
+
+        {actionNotice && (
+          <div className="top-nav-notice" role="status" aria-live="polite">
+            <p className="top-nav-notice-text">
+              <span>{actionNotice}</span>
+              <button
+                className="top-nav-notice-close"
+                onClick={() => setActionNotice("")}
+                aria-label="Dismiss notice"
+              >
+                x
+              </button>
+            </p>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <button
@@ -1160,6 +1405,17 @@ export default function AnalyzerApp() {
               <div className="workspace-menu" role="menu" aria-label="Settings menu">
                 <button className="workspace-menu-item" role="menuitem" onClick={() => setIsSettingsOpen(false)}>
                   Theme tokens (locked)
+                </button>
+                <button
+                  className="workspace-menu-item"
+                  role="menuitem"
+                  onClick={() => {
+                    setIsDataSourceOpen(true);
+                    setIsSettingsOpen(false);
+                    setIsProfileOpen(false);
+                  }}
+                >
+                  Data Sources
                 </button>
                 <button className="workspace-menu-item" role="menuitem" onClick={() => setIsSettingsOpen(false)}>
                   Notification preferences
@@ -1628,30 +1884,58 @@ export default function AnalyzerApp() {
 
                       {message.detailedResult ? (
                         <div className="analysis-detailed-card">
+                          {(() => {
+                            const reasoningReferences = getReasoningReferences(message.detailedResult.references);
+                            return (
+                              <>
                           <div className="analysis-item-header">
                             <span className="text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-obsidian/55">
                               Detailed Analysis
                             </span>
                             <span className={`badge ${classifyTone(message.detailedResult.classification)}`}>
-                              {message.detailedResult.classification}
+                              {classificationBadgeLabel(
+                                message.detailedResult.classification,
+                                message.detailedResult.confidence
+                              )}
                             </span>
-                          </div>
-                          <div className="analysis-requirement-box">
-                            <p className="text-[0.68rem] font-semibold uppercase tracking-[0.12em] text-obsidian/55">
-                              Final Requirement
-                            </p>
-                            <p className="mt-1 text-xs leading-relaxed text-obsidian/72">
-                              {message.detailedResult.finalRequirement}
-                            </p>
                           </div>
                           <div className="analysis-response-box">
                             <p className="analysis-response-label">Why this classification</p>
                             <p className="mt-1 text-sm font-medium leading-relaxed text-obsidian/88">
                               {message.detailedResult.why}
                             </p>
-                            <p className="mt-2 text-xs font-semibold uppercase tracking-[0.1em] text-obsidian/58">
-                              Confidence: {Math.round(message.detailedResult.confidence * 100)}%
-                            </p>
+                            <ul className="analysis-reasoning-list">
+                              <li>
+                                SFRA baseline evidence:{" "}
+                                {reasoningReferences.sfraReference ? (
+                                  <a
+                                    href={reasoningReferences.sfraReference.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="analysis-inline-link"
+                                  >
+                                    {reasoningReferences.sfraReference.title}
+                                  </a>
+                                ) : (
+                                  "No direct SFRA baseline link returned in this run."
+                                )}
+                              </li>
+                              <li>
+                                Project documentation evidence:{" "}
+                                {reasoningReferences.projectReference ? (
+                                  <a
+                                    href={reasoningReferences.projectReference.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="analysis-inline-link"
+                                  >
+                                    {reasoningReferences.projectReference.title}
+                                  </a>
+                                ) : (
+                                  "No project FSD reference link returned in this run."
+                                )}
+                              </li>
+                            </ul>
                           </div>
                           {message.detailedResult.references.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-2">
@@ -1668,6 +1952,9 @@ export default function AnalyzerApp() {
                               ))}
                             </div>
                           )}
+                              </>
+                            );
+                          })()}
                         </div>
                       ) : message.analysisResults?.length ? (
                         <div className="analysis-grid">
@@ -1724,7 +2011,7 @@ export default function AnalyzerApp() {
                         </div>
                       ) : null}
                       {message.role === "assistant" && index > 0 && message.analysisResults?.length && (
-                        <div className="mt-3 flex justify-start">
+                        <div className="mt-3 flex justify-end">
                           <button
                             className="chat-fsd-btn"
                             onClick={() => handleAddToFsd(message)}
@@ -1891,7 +2178,6 @@ export default function AnalyzerApp() {
                   Responses can be inaccurate; please double check before finalizing.
                 </p>
                 {error && <p className="text-xs font-semibold text-rose">{error}</p>}
-                {actionNotice && <p className="text-xs font-semibold text-obsidian/60">{actionNotice}</p>}
               </div>
             </>
           )}
@@ -2171,6 +2457,138 @@ export default function AnalyzerApp() {
                 onClick={() => setIsHelpOpen(false)}
               >
                 Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isDataSourceOpen && (
+        <div className="workspace-modal-backdrop" role="dialog" aria-modal="true" aria-label="Data source settings">
+          <div className="workspace-modal datasource-modal">
+            <div className="workspace-modal-header">
+              <h3 className="text-lg font-semibold text-obsidian">Data Sources</h3>
+              <button className="icon-chip" onClick={() => setIsDataSourceOpen(false)} aria-label="Close data sources">
+                x
+              </button>
+            </div>
+            <div className="workspace-modal-body">
+              <section className="datasource-section">
+                <div className="datasource-section-head">
+                  <p className="text-sm font-semibold text-obsidian/80">SFRA Baseline Sources</p>
+                  <p className="text-xs text-obsidian/60">
+                    Add handpicked links and notes on what should be considered during analysis.
+                  </p>
+                </div>
+                <div className="datasource-list">
+                  {baselineLinks.map((item) => (
+                    <div key={item.id} className="datasource-row">
+                      <input
+                        value={item.url}
+                        onChange={(event) => handleUpdateBaselineLink(item.id, "url", event.target.value)}
+                        className="workspace-input"
+                        placeholder="https://..."
+                      />
+                      <textarea
+                        value={item.note}
+                        onChange={(event) => handleUpdateBaselineLink(item.id, "note", event.target.value)}
+                        className="workspace-input datasource-note-input"
+                        placeholder="What to consider from this source..."
+                      />
+                      <button
+                        className="datasource-remove-btn"
+                        onClick={() => handleRemoveBaselineLink(item.id)}
+                        aria-label="Remove baseline source"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="datasource-add-row">
+                  <input
+                    value={newBaselineUrl}
+                    onChange={(event) => setNewBaselineUrl(event.target.value)}
+                    className="workspace-input"
+                    placeholder="Add source URL"
+                  />
+                  <input
+                    value={newBaselineNote}
+                    onChange={(event) => setNewBaselineNote(event.target.value)}
+                    className="workspace-input"
+                    placeholder="Add note for this source"
+                  />
+                  <button className="datasource-add-btn" onClick={handleAddBaselineLink}>
+                    + Add
+                  </button>
+                </div>
+              </section>
+
+              <section className="datasource-section">
+                <div className="datasource-section-head">
+                  <p className="text-sm font-semibold text-obsidian/80">Project Documentation (Confluence)</p>
+                  <p className="text-xs text-obsidian/60">
+                    Configure project Confluence endpoint and token for ingestion workflows.
+                  </p>
+                </div>
+                <label className="workspace-field">
+                  Confluence URL
+                  <input
+                    value={projectConfluenceUrl}
+                    onChange={(event) => setProjectConfluenceUrl(event.target.value)}
+                    className="workspace-input"
+                    placeholder="https://your-company.atlassian.net/wiki"
+                  />
+                </label>
+                <label className="workspace-field">
+                  Security Token
+                  <input
+                    value={projectSecurityToken}
+                    onChange={(event) => setProjectSecurityToken(event.target.value)}
+                    className="workspace-input"
+                    type="password"
+                    placeholder="Enter token"
+                  />
+                </label>
+                <p className="text-[0.72rem] text-obsidian/58">
+                  Note: current backend ingestion uses server-side Confluence configuration. URL/token capture here is
+                  for governed source management and upcoming connector support.
+                </p>
+              </section>
+              {(isIngestingDataSources || ingestProgress > 0) && (
+                <section className="datasource-ingest-progress">
+                  <div className="datasource-ingest-head">
+                    <p className="datasource-ingest-title">
+                      Ingestion progress: {Math.max(0, Math.min(100, Math.round(ingestProgress)))}%
+                    </p>
+                    <p className="datasource-ingest-estimate">
+                      {ingestStartedAt
+                        ? `Elapsed ${Math.max(1, Math.floor((Date.now() - ingestStartedAt) / 1000))}s • Estimated 1-3 minutes for larger source sets`
+                        : "Estimated 1-3 minutes for larger source sets"}
+                    </p>
+                  </div>
+                  <div className="datasource-progress-track" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(ingestProgress)}>
+                    <span className="datasource-progress-fill" style={{ width: `${Math.max(2, ingestProgress)}%` }} />
+                  </div>
+                  <p className="datasource-ingest-note">
+                    {isIngestingDataSources ? "Ingestion is in progress. Estimated completion depends on source volume." : ingestStatusText}
+                  </p>
+                  {ingestJobId && <p className="datasource-ingest-jobid">Job ID: {ingestJobId}</p>}
+                </section>
+              )}
+              {dataSourceNotice && <p className="text-xs font-semibold text-mint">{dataSourceNotice}</p>}
+              {dataSourceError && <p className="text-xs font-semibold text-rose">{dataSourceError}</p>}
+            </div>
+            <div className="workspace-modal-actions">
+              <button className="rounded-full border border-obsidian/15 px-4 py-2 text-sm" onClick={() => setIsDataSourceOpen(false)}>
+                Close
+              </button>
+              <button
+                className="rounded-full bg-signal px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void handleIngestDataSources()}
+                disabled={isIngestingDataSources}
+              >
+                {isIngestingDataSources ? "Ingesting..." : "Ingest"}
               </button>
             </div>
           </div>

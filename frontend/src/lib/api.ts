@@ -262,3 +262,51 @@ export async function saveFsdTextToConfluence(
   }
   return res.json() as Promise<{ page_id: string; title: string; url: string }>;
 }
+
+export async function ingestConfluence() {
+  const res = await fetch(`${API_BASE}/ingest-confluence`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<{ pages: number; chunks: number }>;
+}
+
+export type IngestStartResponse = {
+  job_id: string;
+  status: string;
+};
+
+export type IngestStatusResponse = {
+  job_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  stage?: string | null;
+  progress: number;
+  pages_total: number;
+  pages_processed: number;
+  pages_indexed: number;
+  pages_skipped: number;
+  chunks: number;
+  started_at?: number | null;
+  finished_at?: number | null;
+  error?: string | null;
+};
+
+export async function startConfluenceIngest() {
+  const res = await fetch(`${API_BASE}/ingest-confluence/start`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<IngestStartResponse>;
+}
+
+export async function getConfluenceIngestStatus(jobId: string) {
+  const res = await fetch(`${API_BASE}/ingest-confluence/status/${encodeURIComponent(jobId)}`);
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<IngestStatusResponse>;
+}

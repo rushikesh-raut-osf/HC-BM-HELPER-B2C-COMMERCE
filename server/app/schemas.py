@@ -156,3 +156,23 @@ class ConfluenceSaveTextRequest(BaseModel):
     parent_id: str
     title: str
     fsd_text: str
+
+
+class IngestStartResponse(BaseModel):
+    job_id: str
+    status: str
+
+
+class IngestStatusResponse(BaseModel):
+    job_id: str
+    status: str
+    stage: Optional[str] = None
+    progress: int = 0
+    pages_total: int = 0
+    pages_processed: int = 0
+    pages_indexed: int = 0
+    pages_skipped: int = 0
+    chunks: int = 0
+    started_at: Optional[float] = None
+    finished_at: Optional[float] = None
+    error: Optional[str] = None
