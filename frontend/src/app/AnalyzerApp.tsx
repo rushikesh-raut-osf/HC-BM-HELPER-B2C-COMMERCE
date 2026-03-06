@@ -224,6 +224,7 @@ const parseConsolidatedClarifications = (text: string) => {
   const lines = text.split("\n").map((line) => line.trim());
   const pairs: Array<{ question: string; answer: string }> = [];
   let summary = "";
+  let summaryPoints: string[] = [];
   for (let i = 0; i < lines.length; i += 1) {
     const current = lines[i];
     const qMatch = current.match(/^Q\d+:\s*(.+)$/i);
@@ -240,10 +241,14 @@ const parseConsolidatedClarifications = (text: string) => {
     const summaryMatch = current.match(/^Final context summary:\s*(.+)$/i);
     if (summaryMatch) {
       summary = summaryMatch[1].trim();
+      summaryPoints = summary
+        .split(/(?:\s*;\s*|\s+\|\s+|(?<=[.!?])\s+)/)
+        .map((part) => part.trim())
+        .filter(Boolean);
     }
   }
   if (!pairs.length && !summary) return null;
-  return { pairs, summary };
+  return { pairs, summary, summaryPoints };
 };
 
 const formatTime = (iso: string) =>
@@ -1997,6 +2002,7 @@ export default function AnalyzerApp() {
                       </div>
                       {parsedClarifications ? (
                         <div className="clarification-structured">
+                          <p className="clarification-kicker">Clarifications captured</p>
                           {parsedClarifications.pairs.length > 0 && (
                             <div className="clarification-qa-list">
                               {parsedClarifications.pairs.map((pair, idx) => (
@@ -2014,7 +2020,15 @@ export default function AnalyzerApp() {
                           {parsedClarifications.summary && (
                             <div className="clarification-summary">
                               <p className="clarification-summary-label">Final context summary</p>
-                              <p className="clarification-summary-text">{parsedClarifications.summary}</p>
+                              {parsedClarifications.summaryPoints.length > 1 ? (
+                                <ul className="clarification-summary-list">
+                                  {parsedClarifications.summaryPoints.map((point, idx) => (
+                                    <li key={`${message.id}-summary-${idx}`}>{point}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="clarification-summary-text">{parsedClarifications.summary}</p>
+                              )}
                             </div>
                           )}
                         </div>

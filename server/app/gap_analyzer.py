@@ -3,13 +3,41 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import logging
+import re
 from typing import Optional
 
+from .capability_synonyms import expand_requirement_query
 from .chroma_service import ChromaService
 from .llm_service import generate_text
 
 
 logger = logging.getLogger(__name__)
+
+_STOPWORDS = {
+    "a",
+    "an",
+    "and",
+    "are",
+    "as",
+    "at",
+    "be",
+    "by",
+    "for",
+    "from",
+    "has",
+    "have",
+    "in",
+    "is",
+    "it",
+    "of",
+    "on",
+    "or",
+    "that",
+    "the",
+    "to",
+    "with",
+}
+
 
 @dataclass
 class GapResult:
@@ -113,8 +141,43 @@ def _coerce_confidence(value: object) -> Optional[float]:
     return max(0.0, min(number, 1.0))
 
 
+def _normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def _tokenize(text: str) -> set[str]:
+    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return {token for token in tokens if token not in _STOPWORDS and len(token) > 2}
+
+
+def _lexical_overlap(a: str, b: str) -> float:
+    tokens_a = _tokenize(a)
+    tokens_b = _tokenize(b)
+    if not tokens_a or not tokens_b:
+        return 0.0
+    intersection = tokens_a & tokens_b
+    union = tokens_a | tokens_b
+    if not union:
+        return 0.0
+    return len(intersection) / len(union)
+
+
+def _is_official_sfra_chunk(chunk: dict) -> bool:
+    meta = chunk.get("metadata") or {}
+    source = str(meta.get("source") or "").lower()
+    source_id = str(meta.get("source_id") or "").lower()
+    url = str(meta.get("url") or "").lower()
+    if source != "baseline_web":
+        return False
+    return (
+        "developer.salesforce.com/docs/commerce/sfra" in source_id
+        or "developer.salesforce.com/docs/commerce/sfra" in url
+    )
+
+
 def _retrieve_chunks(chroma: ChromaService, query_text: str, top_k: int) -> tuple[list[dict], float]:
-    response = chroma.query(query_text, top_k)
+    retrieval_query = expand_requirement_query(query_text)
+    response = chroma.query(retrieval_query, top_k)
     documents = response["documents"][0]
     metadatas = response["metadatas"][0]
     distances = response["distances"][0]
@@ -131,8 +194,19 @@ def _retrieve_chunks(chroma: ChromaService, query_text: str, top_k: int) -> tupl
         bonus = 0.0
         if source == "baseline_web":
             bonus += 0.08
-        if "developer.salesforce.com/docs/commerce/sfra" in source_id or "developer.salesforce.com/docs/commerce/sfra" in url:
+        is_official_sfra = (
+            "developer.salesforce.com/docs/commerce/sfra" in source_id
+            or "developer.salesforce.com/docs/commerce/sfra" in url
+        )
+        if is_official_sfra:
             bonus += 0.1
+            lexical = _lexical_overlap(query_text, doc or "")
+            if lexical >= 0.5:
+                bonus += 0.12
+            normalized_query = _normalize_text(query_text)
+            normalized_doc = _normalize_text(doc or "")
+            if len(normalized_query) >= 12 and normalized_query in normalized_doc:
+                bonus += 0.15
         if source == "confluence" and ("fsd" in source_id or "project" in source_id):
             bonus += 0.03
 
@@ -174,20 +248,40 @@ def _merge_chunks(existing: list[dict], incoming: list[dict], limit: int) -> lis
 
 def _contains_official_sfra_evidence(chunks: list[dict]) -> bool:
     for chunk in chunks[:6]:
-        meta = chunk.get("metadata") or {}
-        source = str(meta.get("source") or "").lower()
-        source_id = str(meta.get("source_id") or "").lower()
-        url = str(meta.get("url") or "").lower()
-        if source == "baseline_web" and (
-            "developer.salesforce.com/docs/commerce/sfra" in source_id
-            or "developer.salesforce.com/docs/commerce/sfra" in url
-        ):
+        if _is_official_sfra_chunk(chunk):
             return True
     return False
 
 
-def _promote_classification_with_baseline_signal(classification: str, confidence: float, chunks: list[dict]) -> str:
+def _best_official_overlap(requirement: str, chunks: list[dict]) -> tuple[float, bool]:
+    normalized_requirement = _normalize_text(requirement)
+    best_overlap = 0.0
+    phrase_hit = False
+    for chunk in chunks[:8]:
+        if not _is_official_sfra_chunk(chunk):
+            continue
+        text = chunk.get("text") or ""
+        best_overlap = max(best_overlap, _lexical_overlap(requirement, text))
+        normalized_chunk = _normalize_text(text)
+        if len(normalized_requirement) >= 12 and normalized_requirement in normalized_chunk:
+            phrase_hit = True
+    return best_overlap, phrase_hit
+
+
+def _promote_classification_with_baseline_signal(
+    requirement: str,
+    classification: str,
+    confidence: float,
+    chunks: list[dict],
+) -> str:
     # If we have strong official SFRA evidence, avoid weak/flat "Partial" outputs by default.
+    best_overlap, phrase_hit = _best_official_overlap(requirement, chunks)
+    if phrase_hit and classification in {"Partial Match", "Custom Dev Required", "Open Question"}:
+        return "OOTB Match"
+    if best_overlap >= 0.55 and confidence >= 0.5 and classification in {"Open Question", "Partial Match"}:
+        return "OOTB Match"
+    if best_overlap >= 0.45 and confidence >= 0.58 and classification == "Custom Dev Required":
+        return "Partial Match"
     if _contains_official_sfra_evidence(chunks) and confidence >= 0.6:
         if classification in {"Open Question", "Partial Match"}:
             return "OOTB Match"
@@ -225,6 +319,9 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
         prompt = (
             "You are classifying SFRA coverage for a requirement.\n"
             "Classes: OOTB Match, Partial Match, Custom Dev Required, Open Question.\n"
+            "Use evidence-first reasoning.\n"
+            "If context explicitly states a feature is available in SFRA out of the box, prefer OOTB Match.\n"
+            "Use Custom Dev Required only when evidence indicates the feature is unsupported or requires net-new code.\n"
             "Return a single line with: <classification> | <confidence 0-1> | <short rationale>.\n\n"
             f"Requirement: {requirement}\n\n"
             f"Context:\n{context}\n"
@@ -263,7 +360,12 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
 
     confidence = _combine_confidence(similarity_confidence, llm_confidence)
     classification = _normalize_classification_with_confidence(classification, confidence)
-    classification = _promote_classification_with_baseline_signal(classification, confidence, top_chunks)
+    classification = _promote_classification_with_baseline_signal(
+        requirement,
+        classification,
+        confidence,
+        top_chunks,
+    )
     citations = _build_citations(top_chunks)
 
     if classification == "Open Question" or confidence < 0.5:
@@ -314,6 +416,7 @@ def analyze_requirement_agentic(
             context = "\n\n".join([chunk["text"][:800] for chunk in working_chunks[:4]])
             prompt = (
                 "You are an SFRA requirement analysis agent.\n"
+                "Use evidence-first reasoning; do not choose Custom Dev Required if official SFRA evidence supports OOTB coverage.\n"
                 "Decide next best action based on current evidence.\n"
                 "Return ONLY valid JSON with keys:\n"
                 "classification: one of [OOTB Match, Partial Match, Custom Dev Required, Open Question]\n"
@@ -368,7 +471,12 @@ def analyze_requirement_agentic(
 
         final_confidence = _combine_confidence(top_score, llm_confidence)
         classification = _normalize_classification_with_confidence(classification, final_confidence)
-        classification = _promote_classification_with_baseline_signal(classification, final_confidence, working_chunks)
+        classification = _promote_classification_with_baseline_signal(
+            requirement,
+            classification,
+            final_confidence,
+            working_chunks,
+        )
         citations = _build_citations(working_chunks)
 
         if not clarifying_questions and (classification == "Open Question" or final_confidence < 0.5):

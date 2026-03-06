@@ -778,7 +778,7 @@ body {
 }
 
 .chat-bubble.user .chat-meta {
-  color: rgba(11, 18, 32, 0.52);
+  color: rgba(11, 18, 32, 0.45);
   font-weight: 600;
   letter-spacing: 0.12em;
 }
@@ -822,29 +822,50 @@ body {
 
 .clarification-structured {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.55rem;
+  max-width: 74ch;
+}
+
+.clarification-kicker {
+  @apply inline-flex w-fit rounded-full border border-signal/25 bg-signal/10 px-2 py-0.5 text-[0.62rem] font-semibold uppercase tracking-[0.08em] text-signal;
 }
 
 .clarification-qa-list {
   display: grid;
-  gap: 0.4rem;
+  gap: 0.55rem;
 }
 
 .clarification-qa-item {
-  @apply rounded-xl border border-signal/25 bg-white/70 px-3 py-2;
+  @apply rounded-xl border border-signal/20 bg-white/75 px-3 py-2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
 }
 
 .clarification-q,
 .clarification-a {
-  @apply text-sm leading-relaxed text-obsidian/80;
+  @apply text-sm text-obsidian/80;
+}
+
+.clarification-q {
+  line-height: 1.55;
+  font-weight: 600;
 }
 
 .clarification-a {
-  margin-top: 0.15rem;
+  margin-top: 0.3rem;
+  padding-top: 0.28rem;
+  border-top: 1px dashed rgba(37, 99, 235, 0.16);
+  line-height: 1.45;
+  color: rgba(11, 18, 32, 0.74);
 }
 
 .clarification-label {
   @apply mr-1 inline-flex rounded-full border border-signal/25 bg-signal/10 px-1.5 py-0.5 text-[0.62rem] font-semibold uppercase tracking-[0.08em] text-signal;
+}
+
+.clarification-a .clarification-label {
+  border-color: rgba(13, 148, 136, 0.28);
+  background: rgba(13, 148, 136, 0.12);
+  color: rgba(15, 118, 110, 0.96);
 }
 
 .clarification-summary {
@@ -857,6 +878,12 @@ body {
 
 .clarification-summary-text {
   @apply mt-1 text-sm leading-relaxed text-obsidian/80;
+}
+
+.clarification-summary-list {
+  @apply mt-1 list-disc pl-5 text-sm leading-relaxed text-obsidian/75;
+  display: grid;
+  gap: 0.18rem;
 }
 
 .followup-inline-card {

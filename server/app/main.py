@@ -641,7 +641,11 @@ def analyze_agentic(payload: AnalyzeRequest):
 
 
 @app.post("/analyze-file", response_model=AnalyzeResponse)
-async def analyze_file(file: UploadFile = File(...), top_k: int = Form(None)):
+async def analyze_file(
+    file: UploadFile = File(...),
+    top_k: int = Form(None),
+    agent_mode: bool | None = Form(None),
+):
     data = await file.read()
     filename = (file.filename or "").lower()
     if filename.endswith(".docx"):
@@ -656,7 +660,7 @@ async def analyze_file(file: UploadFile = File(...), top_k: int = Form(None)):
 
     use_top_k = top_k or settings.top_k
     results = []
-    use_agent_mode = settings.agentic_default
+    use_agent_mode = settings.agentic_default if agent_mode is None else agent_mode
     for requirement in requirements:
         gap = _analyze_single_requirement(requirement, use_top_k, use_agent_mode)
         results.append(GapResult(**gap.__dict__))

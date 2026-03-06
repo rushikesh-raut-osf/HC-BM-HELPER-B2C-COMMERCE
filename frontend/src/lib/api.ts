@@ -67,7 +67,7 @@ export async function analyzeRequirementsText(text: string, baselineName?: strin
   const res = await fetch(`${API_BASE}/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ requirements_text: text, baseline_name: baselineName }),
+    body: JSON.stringify({ requirements_text: text, baseline_name: baselineName, agent_mode: true }),
   });
   if (!res.ok) {
     throw new Error(await res.text());
@@ -84,7 +84,7 @@ export async function analyzeSingleRequirement(text: string) {
   const res = await fetch(`${API_BASE}/analyze`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ requirements_list: [text] }),
+    body: JSON.stringify({ requirements_list: [text], agent_mode: true }),
   });
   if (!res.ok) {
     throw new Error(await res.text());
@@ -122,6 +122,7 @@ export async function fetchFollowupStep(
 export async function analyzeRequirementsFile(file: File) {
   const form = new FormData();
   form.append("file", file);
+  form.append("agent_mode", "true");
   const res = await fetch(`${API_BASE}/analyze-file`, {
     method: "POST",
     body: form,
