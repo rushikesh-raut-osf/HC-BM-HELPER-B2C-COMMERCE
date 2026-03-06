@@ -278,6 +278,18 @@ export type IngestStartResponse = {
   status: string;
 };
 
+export type IngestSourceLink = {
+  url: string;
+  note?: string;
+};
+
+export type IngestStartRequest = {
+  baseline_links?: IngestSourceLink[];
+  include_confluence?: boolean;
+  crawl_depth?: number;
+  max_pages?: number;
+};
+
 export type IngestStatusResponse = {
   job_id: string;
   status: "queued" | "running" | "completed" | "failed";
@@ -287,15 +299,19 @@ export type IngestStatusResponse = {
   pages_processed: number;
   pages_indexed: number;
   pages_skipped: number;
+  web_pages_indexed?: number;
+  web_pages_skipped?: number;
   chunks: number;
   started_at?: number | null;
   finished_at?: number | null;
   error?: string | null;
 };
 
-export async function startConfluenceIngest() {
+export async function startConfluenceIngest(payload?: IngestStartRequest) {
   const res = await fetch(`${API_BASE}/ingest-confluence/start`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload || {}),
   });
   if (!res.ok) {
     throw new Error(await res.text());

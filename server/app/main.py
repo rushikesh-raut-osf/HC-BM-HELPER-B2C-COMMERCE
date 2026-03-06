@@ -11,6 +11,10 @@ import json
 import threading
 import time
 import uuid
+from urllib.parse import urljoin, urlparse
+
+import httpx
+from bs4 import BeautifulSoup
 
 from .confluence import (
     create_child_page,
@@ -60,6 +64,7 @@ from .schemas import (
     ConfluenceSaveRequest,
     ConfluenceSaveTextRequest,
     ConfluenceSaveResponse,
+    IngestStartRequest,
     IngestStartResponse,
     IngestStatusResponse,
 )
@@ -345,18 +350,196 @@ def _run_confluence_ingest(progress_cb=None) -> dict:
             pages_skipped=skipped_pages,
             chunks=total_chunks,
         )
+    return {"pages": total_pages, "chunks": total_chunks, "indexed": indexed_pages, "skipped": skipped_pages}
+
+
+def _normalize_web_url(url: str) -> str | None:
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    normalized = parsed._replace(fragment="", params="")
+    return normalized.geturl()
+
+
+def _extract_web_links(html_text: str, base_url: str, host: str) -> list[str]:
+    soup = BeautifulSoup(html_text, "html.parser")
+    links: list[str] = []
+    seen: set[str] = set()
+    for anchor in soup.find_all("a", href=True):
+        href = str(anchor.get("href") or "").strip()
+        if not href or href.startswith(("javascript:", "mailto:", "tel:")):
+            continue
+        absolute = _normalize_web_url(urljoin(base_url, href))
+        if not absolute:
+            continue
+        parsed = urlparse(absolute)
+        if parsed.netloc.lower() != host.lower():
+            continue
+        lowered = parsed.path.lower()
+        if lowered.endswith((".png", ".jpg", ".jpeg", ".svg", ".gif", ".pdf", ".zip")):
+            continue
+        if absolute in seen:
+            continue
+        seen.add(absolute)
+        links.append(absolute)
+    return links
+
+
+def _extract_web_text(html_text: str) -> tuple[str, str]:
+    soup = BeautifulSoup(html_text, "html.parser")
+    for tag_name in ("script", "style", "noscript"):
+        for node in soup.find_all(tag_name):
+            node.decompose()
+    title = (soup.title.get_text(strip=True) if soup.title else "") or "Web source"
+    text = soup.get_text(separator="\n")
+    cleaned = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
+    return title, cleaned
+
+
+def _run_web_sources_ingest(links: list[dict], crawl_depth: int, max_pages: int, progress_cb=None) -> dict:
+    queue: list[tuple[str, int, str, str]] = []
+    seen: set[str] = set()
+    total_chunks = 0
+    indexed_pages = 0
+    skipped_pages = 0
+    processed_pages = 0
+    crawl_depth = max(0, min(crawl_depth, 2))
+    max_pages = max(1, min(max_pages, 300))
+
+    for entry in links:
+        raw_url = str(entry.get("url") or "").strip()
+        normalized = _normalize_web_url(raw_url)
+        if not normalized:
+            continue
+        note = str(entry.get("note") or "").strip()
+        queue.append((normalized, 0, normalized, note))
+
+    if not queue:
+        return {"processed": 0, "indexed": 0, "skipped": 0, "chunks": 0}
+
+    with httpx.Client(timeout=20.0, headers={"User-Agent": "Scout-Ingest/1.0"}) as client:
+        while queue and processed_pages < max_pages:
+            url, depth, seed_url, note = queue.pop(0)
+            if url in seen:
+                continue
+            seen.add(url)
+
+            try:
+                response = client.get(url)
+                response.raise_for_status()
+            except Exception:
+                skipped_pages += 1
+                processed_pages += 1
+                continue
+
+            content_type = response.headers.get("content-type", "").lower()
+            if "text/html" not in content_type:
+                skipped_pages += 1
+                processed_pages += 1
+                continue
+
+            html_text = response.text
+            title, text = _extract_web_text(html_text)
+            if not text.strip():
+                skipped_pages += 1
+                processed_pages += 1
+                continue
+
+            if note:
+                text = f"Source Note: {note}\n\n{text}"
+            source_id = url
+            if chroma.should_skip("baseline_web", source_id, text):
+                skipped_pages += 1
+            else:
+                doc = IngestDocument(
+                    source="baseline_web",
+                    source_id=source_id,
+                    title=title,
+                    url=url,
+                    space_key=urlparse(seed_url).netloc.lower(),
+                    updated_at=None,
+                    text=text,
+                )
+                total_chunks += upsert_document_chunks(chroma, doc, task_type="retrieval_document")
+                indexed_pages += 1
+            processed_pages += 1
+
+            if depth < crawl_depth:
+                host = urlparse(seed_url).netloc
+                discovered = _extract_web_links(html_text, url, host)
+                for link in discovered[:40]:
+                    if link not in seen:
+                        queue.append((link, depth + 1, seed_url, note))
+
+            if progress_cb:
+                web_progress = 62 + int((processed_pages / max_pages) * 36)
+                progress_cb(
+                    progress=min(98, max(62, web_progress)),
+                    web_pages_indexed=indexed_pages,
+                    web_pages_skipped=skipped_pages,
+                    stage=f"Indexed baseline web sources: {processed_pages} pages processed...",
+                )
+
     return {
-        "pages": total_pages,
-        "chunks": total_chunks,
+        "processed": processed_pages,
         "indexed": indexed_pages,
         "skipped": skipped_pages,
+        "chunks": total_chunks,
+    }
+
+
+def _run_ingest_pipeline(payload: dict | None, progress_cb=None) -> dict:
+    include_confluence = True if payload is None else bool(payload.get("include_confluence", True))
+    baseline_links = payload.get("baseline_links", []) if payload else []
+    crawl_depth = int(payload.get("crawl_depth", 1)) if payload else 1
+    max_pages = int(payload.get("max_pages", 60)) if payload else 60
+
+    total_chunks = 0
+    confluence_result = {"pages": 0, "indexed": 0, "skipped": 0, "chunks": 0}
+    web_result = {"processed": 0, "indexed": 0, "skipped": 0, "chunks": 0}
+
+    if include_confluence:
+        if progress_cb:
+            progress_cb(stage="Starting Confluence ingestion...", progress=3)
+        try:
+            confluence_result = _run_confluence_ingest(progress_cb=progress_cb)
+            total_chunks += confluence_result["chunks"]
+        except ValueError:
+            # Allow baseline-web-only ingestion when Confluence config is unavailable.
+            if not baseline_links:
+                raise
+            if progress_cb:
+                progress_cb(stage="Confluence ingestion skipped (configuration unavailable).", progress=58)
+
+    if baseline_links:
+        if progress_cb:
+            progress_cb(stage="Starting baseline web source ingestion...", progress=62)
+        web_result = _run_web_sources_ingest(
+            baseline_links,
+            crawl_depth=crawl_depth,
+            max_pages=max_pages,
+            progress_cb=progress_cb,
+        )
+        total_chunks += web_result["chunks"]
+
+    return {
+        "pages": confluence_result["pages"],
+        "chunks": total_chunks,
+        "indexed": confluence_result["indexed"],
+        "skipped": confluence_result["skipped"],
+        "web_pages_processed": web_result["processed"],
+        "web_pages_indexed": web_result["indexed"],
+        "web_pages_skipped": web_result["skipped"],
     }
 
 
 def _run_ingest_job(job_id: str) -> None:
     _set_ingest_job(job_id, status="running")
     try:
-        result = _run_confluence_ingest(progress_cb=lambda **kwargs: _set_ingest_job(job_id, **kwargs))
+        with ingest_jobs_lock:
+            payload = dict(ingest_jobs.get(job_id, {}).get("payload") or {})
+
+        result = _run_ingest_pipeline(progress_cb=lambda **kwargs: _set_ingest_job(job_id, **kwargs), payload=payload)
         _set_ingest_job(
             job_id,
             status="completed",
@@ -366,6 +549,8 @@ def _run_ingest_job(job_id: str) -> None:
             pages_processed=result["pages"],
             pages_indexed=result["indexed"],
             pages_skipped=result["skipped"],
+            web_pages_indexed=result["web_pages_indexed"],
+            web_pages_skipped=result["web_pages_skipped"],
             chunks=result["chunks"],
             finished_at=time.time(),
             error=None,
@@ -556,9 +741,10 @@ def ingest_confluence():
 
 
 @app.post("/ingest-confluence/start", response_model=IngestStartResponse)
-def ingest_confluence_start(background_tasks: BackgroundTasks):
+def ingest_confluence_start(background_tasks: BackgroundTasks, payload: IngestStartRequest | None = None):
     job_id = str(uuid.uuid4())
     started_at = time.time()
+    request_payload = payload.model_dump() if payload else {}
     with ingest_jobs_lock:
         ingest_jobs[job_id] = {
             "job_id": job_id,
@@ -569,10 +755,13 @@ def ingest_confluence_start(background_tasks: BackgroundTasks):
             "pages_processed": 0,
             "pages_indexed": 0,
             "pages_skipped": 0,
+            "web_pages_indexed": 0,
+            "web_pages_skipped": 0,
             "chunks": 0,
             "started_at": started_at,
             "finished_at": None,
             "error": None,
+            "payload": request_payload,
         }
     background_tasks.add_task(_run_ingest_job, job_id)
     return IngestStartResponse(job_id=job_id, status="queued")
@@ -585,6 +774,7 @@ def ingest_confluence_status(job_id: str):
         if not job:
             raise HTTPException(status_code=404, detail="Ingestion job not found")
         payload = dict(job)
+        payload.pop("payload", None)
     return IngestStatusResponse(**payload)
 
 

@@ -49,7 +49,19 @@ def _combine_confidence(similarity: Optional[float], llm_confidence: Optional[fl
         return similarity or 0.0
     if similarity is None:
         return llm_confidence
-    return 0.5 * similarity + 0.5 * llm_confidence
+    # Keep semantic retrieval as primary signal; LLM confidence is a refinement.
+    return 0.6 * similarity + 0.4 * llm_confidence
+
+
+def _normalize_classification_with_confidence(classification: str, confidence: float) -> str:
+    # Prevent contradictory outputs such as "Partial Match" with very low confidence.
+    if classification == "OOTB Match" and confidence < 0.62:
+        return "Partial Match"
+    if classification == "Partial Match" and confidence < 0.45:
+        return "Open Question"
+    if classification == "Custom Dev Required" and confidence < 0.4:
+        return "Open Question"
+    return classification
 
 
 def _build_citations(top_chunks: list[dict], limit: int = 3) -> list[dict]:
@@ -198,7 +210,10 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
                 }
                 if candidate in allowed:
                     classification = candidate
-                llm_confidence = float(parts[1])
+                try:
+                    llm_confidence = max(0.0, min(float(parts[1]), 1.0))
+                except (TypeError, ValueError):
+                    llm_confidence = None
                 if len(parts) >= 3:
                     rationale = parts[2]
             else:
@@ -208,6 +223,7 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
             rationale = "Similarity-based classification (LLM unavailable)"
 
     confidence = _combine_confidence(similarity_confidence, llm_confidence)
+    classification = _normalize_classification_with_confidence(classification, confidence)
     citations = _build_citations(top_chunks)
 
     if classification == "Open Question" or confidence < 0.5:

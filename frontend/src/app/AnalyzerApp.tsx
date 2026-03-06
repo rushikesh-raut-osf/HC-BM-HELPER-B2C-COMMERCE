@@ -55,7 +55,7 @@ type ChatMessage = {
     classification: string;
     why: string;
     confidence: number;
-    references: Array<{ title: string; url: string }>;
+    references: Array<{ title: string; url?: string; source?: string; sourceId?: string; score?: number }>;
   };
   attachments?: AttachmentMeta[];
   analysisResults?: GapResult[];
@@ -259,19 +259,29 @@ const classificationBadgeLabel = (classification: string, confidence: number) =>
   return `${classification} (${percent}%)`;
 };
 
-const looksLikeSfraReference = (source: { title: string; url: string }) => {
-  const token = `${source.title} ${source.url}`.toLowerCase();
+const looksLikeSfraReference = (source: {
+  title: string;
+  url?: string;
+  source?: string;
+  sourceId?: string;
+}) => {
+  const token = `${source.title} ${source.url || ""} ${source.source || ""} ${source.sourceId || ""}`.toLowerCase();
   return (
     token.includes("sfra") ||
     token.includes("salesforce") ||
     token.includes("b2c-commerce") ||
-    token.includes("commerce-cloud")
+    token.includes("commerce-cloud") ||
+    token.includes("baseline_web")
   );
 };
 
-const getReasoningReferences = (sources: Array<{ title: string; url: string }>) => {
+const getReasoningReferences = (
+  sources: Array<{ title: string; url?: string; source?: string; sourceId?: string; score?: number }>
+) => {
   const sfraReference = sources.find((source) => looksLikeSfraReference(source));
-  const projectReference = sources.find((source) => source !== sfraReference);
+  const projectReference = sources.find(
+    (source) => source !== sfraReference && (source.source === "confluence" || source.sourceId?.includes("FSD"))
+  ) || sources.find((source) => source !== sfraReference);
   return { sfraReference, projectReference };
 };
 
@@ -289,16 +299,25 @@ const statusCounts = (results: GapResult[]) => {
 
 const getSources = (item: GapResult) => {
   const seen = new Set<string>();
-  const sources: Array<{ title: string; url: string }> = [];
+  const sources: Array<{ title: string; url?: string; source?: string; sourceId?: string; score?: number }> = [];
   for (const chunk of item.top_chunks || []) {
     const url = typeof chunk.metadata?.url === "string" ? chunk.metadata.url : "";
-    if (!url || seen.has(url)) continue;
-    seen.add(url);
+    const source = typeof chunk.metadata?.source === "string" ? chunk.metadata.source : "";
+    const sourceId = typeof chunk.metadata?.source_id === "string" ? chunk.metadata.source_id : "";
+    const dedupeKey = url || `${source}:${sourceId}`;
+    if (!dedupeKey || seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
     const title =
       (typeof chunk.metadata?.title === "string" && chunk.metadata.title) ||
-      (typeof chunk.metadata?.source_id === "string" && chunk.metadata.source_id) ||
+      sourceId ||
       "Source page";
-    sources.push({ title, url });
+    sources.push({
+      title,
+      url: url || undefined,
+      source: source || undefined,
+      sourceId: sourceId || undefined,
+      score: typeof chunk.score === "number" ? chunk.score : undefined,
+    });
   }
   return sources;
 };
@@ -1268,7 +1287,14 @@ export default function AnalyzerApp() {
     try {
       let started: { job_id: string; status: string } | null = null;
       try {
-        started = await startConfluenceIngest();
+        started = await startConfluenceIngest({
+          baseline_links: baselineLinks
+            .map((item) => ({ url: item.url.trim(), note: item.note.trim() }))
+            .filter((item) => Boolean(item.url)),
+          include_confluence: true,
+          crawl_depth: 1,
+          max_pages: 80,
+        });
       } catch (startErr) {
         const message = startErr instanceof Error ? startErr.message : "";
         const isNotFound = message.includes("Not Found") || message.includes("404");
@@ -1320,11 +1346,13 @@ export default function AnalyzerApp() {
       const handleIngestCompleted = (status: IngestStatusResponse) => {
         setIngestProgress(100);
         setIngestStatusText("Ingestion completed.");
+        const webIndexed = status.web_pages_indexed || 0;
+        const webSkipped = status.web_pages_skipped || 0;
         setDataSourceNotice(
-          `Ingestion completed: ${status.pages_total} pages scanned, ${status.pages_indexed} indexed, ${status.pages_skipped} skipped, ${status.chunks} chunks stored.`
+          `Ingestion completed: Confluence ${status.pages_indexed}/${status.pages_total} indexed (${status.pages_skipped} skipped), Web ${webIndexed} indexed (${webSkipped} skipped), ${status.chunks} chunks stored.`
         );
         setActionNotice(
-          `Data ingestion completed: ${status.pages_indexed}/${status.pages_total} pages indexed, ${status.chunks} chunks.`
+          `Data ingestion completed: Confluence ${status.pages_indexed}/${status.pages_total}, Web ${webIndexed}, ${status.chunks} chunks.`
         );
         setIsIngestingDataSources(false);
       };
@@ -1945,14 +1973,23 @@ export default function AnalyzerApp() {
                               <li>
                                 SFRA baseline evidence:{" "}
                                 {reasoningReferences.sfraReference ? (
-                                  <a
-                                    href={reasoningReferences.sfraReference.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="analysis-inline-link"
-                                  >
-                                    {reasoningReferences.sfraReference.title}
-                                  </a>
+                                  reasoningReferences.sfraReference.url ? (
+                                    <a
+                                      href={reasoningReferences.sfraReference.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="analysis-inline-link"
+                                    >
+                                      {reasoningReferences.sfraReference.title}
+                                    </a>
+                                  ) : (
+                                    <span className="analysis-inline-fallback">
+                                      {reasoningReferences.sfraReference.title}
+                                      {reasoningReferences.sfraReference.source
+                                        ? ` (${reasoningReferences.sfraReference.source})`
+                                        : ""}
+                                    </span>
+                                  )
                                 ) : (
                                   "No direct SFRA baseline link returned in this run."
                                 )}
@@ -1960,14 +1997,23 @@ export default function AnalyzerApp() {
                               <li>
                                 Project documentation evidence:{" "}
                                 {reasoningReferences.projectReference ? (
-                                  <a
-                                    href={reasoningReferences.projectReference.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="analysis-inline-link"
-                                  >
-                                    {reasoningReferences.projectReference.title}
-                                  </a>
+                                  reasoningReferences.projectReference.url ? (
+                                    <a
+                                      href={reasoningReferences.projectReference.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="analysis-inline-link"
+                                    >
+                                      {reasoningReferences.projectReference.title}
+                                    </a>
+                                  ) : (
+                                    <span className="analysis-inline-fallback">
+                                      {reasoningReferences.projectReference.title}
+                                      {reasoningReferences.projectReference.source
+                                        ? ` (${reasoningReferences.projectReference.source})`
+                                        : ""}
+                                    </span>
+                                  )
                                 ) : (
                                   "No project FSD reference link returned in this run."
                                 )}
@@ -1977,15 +2023,24 @@ export default function AnalyzerApp() {
                           {message.detailedResult.references.length > 0 && (
                             <div className="mt-2 flex flex-wrap gap-2">
                               {message.detailedResult.references.map((source) => (
-                                <a
-                                  key={source.url}
-                                  href={source.url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="rounded-full border border-obsidian/10 px-3 py-1 text-[0.65rem] text-obsidian/70"
-                                >
-                                  {source.title}
-                                </a>
+                                source.url ? (
+                                  <a
+                                    key={`${source.url}-${source.title}`}
+                                    href={source.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="rounded-full border border-obsidian/10 px-3 py-1 text-[0.65rem] text-obsidian/70"
+                                  >
+                                    {source.title}
+                                  </a>
+                                ) : (
+                                  <span
+                                    key={`${source.source || "source"}-${source.sourceId || source.title}`}
+                                    className="rounded-full border border-obsidian/10 bg-white/70 px-3 py-1 text-[0.65rem] text-obsidian/70"
+                                  >
+                                    {source.title}
+                                  </span>
+                                )
                               ))}
                             </div>
                           )}
@@ -2032,15 +2087,24 @@ export default function AnalyzerApp() {
                               })()}
                               <div className="mt-2 flex flex-wrap gap-2">
                                 {getSources(item).slice(0, 2).map((source) => (
-                                  <a
-                                    key={source.url}
-                                    href={source.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="rounded-full border border-obsidian/10 px-3 py-1 text-[0.65rem] text-obsidian/70"
-                                  >
-                                    {source.title}
-                                  </a>
+                                  source.url ? (
+                                    <a
+                                      key={`${source.url}-${source.title}`}
+                                      href={source.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="rounded-full border border-obsidian/10 px-3 py-1 text-[0.65rem] text-obsidian/70"
+                                    >
+                                      {source.title}
+                                    </a>
+                                  ) : (
+                                    <span
+                                      key={`${source.source || "source"}-${source.sourceId || source.title}`}
+                                      className="rounded-full border border-obsidian/10 bg-white/70 px-3 py-1 text-[0.65rem] text-obsidian/70"
+                                    >
+                                      {source.title}
+                                    </span>
+                                  )
                                 ))}
                               </div>
                             </div>
@@ -2595,8 +2659,8 @@ export default function AnalyzerApp() {
                   />
                 </label>
                 <p className="text-[0.72rem] text-obsidian/58">
-                  Note: current backend ingestion uses server-side Confluence configuration. URL/token capture here is
-                  for governed source management and upcoming connector support.
+                  Note: baseline links added above are ingested directly. Confluence ingestion currently uses server-side
+                  configuration; this URL/token is retained for managed source setup.
                 </p>
               </section>
               {(isIngestingDataSources || ingestProgress > 0) && (

@@ -164,6 +164,18 @@ class IngestStartResponse(BaseModel):
     status: str
 
 
+class DataSourceLinkInput(BaseModel):
+    url: str
+    note: Optional[str] = None
+
+
+class IngestStartRequest(BaseModel):
+    baseline_links: list[DataSourceLinkInput] = Field(default_factory=list)
+    include_confluence: bool = True
+    crawl_depth: int = Field(default=1, ge=0, le=2)
+    max_pages: int = Field(default=60, ge=1, le=300)
+
+
 class IngestStatusResponse(BaseModel):
     job_id: str
     status: str
@@ -173,6 +185,8 @@ class IngestStatusResponse(BaseModel):
     pages_processed: int = 0
     pages_indexed: int = 0
     pages_skipped: int = 0
+    web_pages_indexed: int = 0
+    web_pages_skipped: int = 0
     chunks: int = 0
     started_at: Optional[float] = None
     finished_at: Optional[float] = None

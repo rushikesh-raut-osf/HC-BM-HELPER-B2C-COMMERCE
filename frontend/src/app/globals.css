@@ -1025,6 +1025,11 @@ body {
   text-underline-offset: 2px;
 }
 
+.analysis-inline-fallback {
+  color: rgba(11, 18, 32, 0.78);
+  font-weight: 600;
+}
+
 .followup-row {
   display: inline-flex;
   align-items: center;
