@@ -220,6 +220,32 @@ const buildConsolidatedRequirementText = (baseRequirement: string, answers: Guid
   return lines.join("\n");
 };
 
+const parseConsolidatedClarifications = (text: string) => {
+  const lines = text.split("\n").map((line) => line.trim());
+  const pairs: Array<{ question: string; answer: string }> = [];
+  let summary = "";
+  for (let i = 0; i < lines.length; i += 1) {
+    const current = lines[i];
+    const qMatch = current.match(/^Q\d+:\s*(.+)$/i);
+    if (qMatch) {
+      const next = lines[i + 1] || "";
+      const aMatch = next.match(/^A\d+:\s*(.+)$/i);
+      pairs.push({
+        question: qMatch[1].trim(),
+        answer: aMatch ? aMatch[1].trim() : "",
+      });
+      if (aMatch) i += 1;
+      continue;
+    }
+    const summaryMatch = current.match(/^Final context summary:\s*(.+)$/i);
+    if (summaryMatch) {
+      summary = summaryMatch[1].trim();
+    }
+  }
+  if (!pairs.length && !summary) return null;
+  return { pairs, summary };
+};
+
 const formatTime = (iso: string) =>
   new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
@@ -425,6 +451,7 @@ export default function AnalyzerApp() {
   } | null>(null);
   const [threadSearch, setThreadSearch] = useState("");
   const [expandedAnalysisKeys, setExpandedAnalysisKeys] = useState<Set<string>>(new Set());
+  const [expandedSummaryItemIds, setExpandedSummaryItemIds] = useState<Set<string>>(new Set());
   const [baselineLinks, setBaselineLinks] = useState<DataSourceLink[]>(DEFAULT_BASELINE_LINKS);
   const [newBaselineUrl, setNewBaselineUrl] = useState("");
   const [newBaselineNote, setNewBaselineNote] = useState("");
@@ -486,17 +513,34 @@ export default function AnalyzerApp() {
     return lines.slice(0, 8);
   }, [fsdPreviewDraft]);
 
-  const latestCounts = useMemo(() => statusCounts(latestAnalysisResults), [latestAnalysisResults]);
+  const fsdCoverageCounts = useMemo(() => {
+    const counts = { total: 0, ootb: 0, partial: 0, custom: 0, open: 0 };
+    for (const item of activeFsdSelections) {
+      for (const classification of item.classifications || []) {
+        const label = classification.toLowerCase();
+        counts.total += 1;
+        if (label.includes("ootb")) counts.ootb += 1;
+        else if (label.includes("partial")) counts.partial += 1;
+        else if (label.includes("open")) counts.open += 1;
+        else counts.custom += 1;
+      }
+    }
+    return counts;
+  }, [activeFsdSelections]);
+  const isCoverageEmpty = useMemo(
+    () => activeFsdSelections.length === 0 || fsdCoverageCounts.total === 0,
+    [activeFsdSelections.length, fsdCoverageCounts.total]
+  );
 
   const summaryPercentages = useMemo(() => {
-    const total = latestCounts.total || 1;
+    const total = fsdCoverageCounts.total || 1;
     return {
-      ootb: Math.round((latestCounts.ootb / total) * 100),
-      partial: Math.round((latestCounts.partial / total) * 100),
-      custom: Math.round((latestCounts.custom / total) * 100),
-      open: Math.round((latestCounts.open / total) * 100),
+      ootb: Math.round((fsdCoverageCounts.ootb / total) * 100),
+      partial: Math.round((fsdCoverageCounts.partial / total) * 100),
+      custom: Math.round((fsdCoverageCounts.custom / total) * 100),
+      open: Math.round((fsdCoverageCounts.open / total) * 100),
     };
-  }, [latestCounts]);
+  }, [fsdCoverageCounts]);
 
   const filteredThreads = useMemo(() => {
     const query = threadSearch.trim().toLowerCase();
@@ -823,6 +867,15 @@ export default function AnalyzerApp() {
     setAddedMessageIdsByThread((prev) => {
       const current = prev[activeThread.id] || [];
       return { ...prev, [activeThread.id]: current.filter((id) => id !== messageId) };
+    });
+  };
+
+  const toggleSummaryItemExpansion = (itemId: string) => {
+    setExpandedSummaryItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(itemId)) next.delete(itemId);
+      else next.add(itemId);
+      return next;
     });
   };
 
@@ -1924,6 +1977,13 @@ export default function AnalyzerApp() {
                           : ""
                       }`}
                     >
+                      {(() => {
+                        const parsedClarifications =
+                          message.role === "user" && message.kind === "guided_answer"
+                            ? parseConsolidatedClarifications(message.text)
+                            : null;
+                        return (
+                          <>
                       <div className="chat-meta">
                         {message.role === "user" ? (
                           <span>You</span>
@@ -1935,7 +1995,35 @@ export default function AnalyzerApp() {
                         )}
                         <span>{formatTime(message.createdAt)}</span>
                       </div>
-                      <p className="chat-text">{message.text}</p>
+                      {parsedClarifications ? (
+                        <div className="clarification-structured">
+                          {parsedClarifications.pairs.length > 0 && (
+                            <div className="clarification-qa-list">
+                              {parsedClarifications.pairs.map((pair, idx) => (
+                                <div key={`${message.id}-qa-${idx}`} className="clarification-qa-item">
+                                  <p className="clarification-q">
+                                    <span className="clarification-label">Q{idx + 1}</span> {pair.question}
+                                  </p>
+                                  <p className="clarification-a">
+                                    <span className="clarification-label">A{idx + 1}</span> {pair.answer || "Not provided"}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {parsedClarifications.summary && (
+                            <div className="clarification-summary">
+                              <p className="clarification-summary-label">Final context summary</p>
+                              <p className="clarification-summary-text">{parsedClarifications.summary}</p>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="chat-text">{message.text}</p>
+                      )}
+                          </>
+                        );
+                      })()}
 
                       {message.attachments?.length ? (
                         <div className="chat-attachments">
@@ -2113,19 +2201,22 @@ export default function AnalyzerApp() {
                       ) : null}
                       {message.role === "assistant" && index > 0 && message.analysisResults?.length && (
                         <div className="mt-3 flex justify-end">
+                          {recentlyAddedToSidebar?.threadId === activeThreadId &&
+                            recentlyAddedToSidebar?.messageId === message.id && (
+                              <span className="mr-2 self-center text-[0.68rem] font-semibold text-signal chat-inline-toast">
+                                Added to summary sidebar
+                              </span>
+                            )}
                           <button
                             className="chat-fsd-btn"
                             onClick={() => handleAddToFsd(message)}
                             disabled={activeAddedMessageIds.has(message.id)}
                           >
-                            {activeAddedMessageIds.has(message.id) ? "Added to FSD" : "Add to FSD"}
+                            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                              <path d="M12 5v14M5 12h14" />
+                            </svg>
+                            <span>{activeAddedMessageIds.has(message.id) ? "Added to FSD" : "Add to FSD"}</span>
                           </button>
-                          {recentlyAddedToSidebar?.threadId === activeThreadId &&
-                            recentlyAddedToSidebar?.messageId === message.id && (
-                              <span className="ml-2 self-center text-[0.68rem] font-semibold text-signal chat-inline-toast">
-                                Added to summary sidebar
-                              </span>
-                            )}
                         </div>
                       )}
                     </article>
@@ -2272,7 +2363,11 @@ export default function AnalyzerApp() {
                     className="composer-send"
                     disabled={loading || activeGuidedCycle?.status === "guided" || (!composer.trim() && attachments.length === 0)}
                   >
-                    Send
+                    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M3 11.5 21 3l-8.5 18-2.2-6.3L3 11.5Z" />
+                      <path d="M10.3 14.7 21 3" />
+                    </svg>
+                    <span>Send</span>
                   </button>
                 </div>
                 <p className="mt-2 text-center text-[0.7rem] text-obsidian/55">
@@ -2309,29 +2404,49 @@ export default function AnalyzerApp() {
             </button>
           </div>
 
-          <div className="summary-metrics">
-            <div className="summary-metric">
-              <span>Total</span>
-              <strong>{latestCounts.total}</strong>
+          <div className={`summary-metrics ${isCoverageEmpty ? "is-empty" : ""}`}>
+            <div className="summary-metrics-head">
+              <p className="summary-metrics-title">Overall FSD Coverage</p>
+              <p className="summary-metrics-subtitle">Data from finalized points added to FSD.</p>
             </div>
-            <div className="summary-metric">
-              <span>OOTB</span>
-              <strong>
-                {latestCounts.ootb} ({summaryPercentages.ootb}%)
-              </strong>
-            </div>
-            <div className="summary-metric">
-              <span>Partial</span>
-              <strong>
-                {latestCounts.partial} ({summaryPercentages.partial}%)
-              </strong>
-            </div>
-            <div className="summary-metric">
-              <span>Custom Dev</span>
-              <strong>
-                {latestCounts.custom} ({summaryPercentages.custom}%)
-              </strong>
-            </div>
+            {isCoverageEmpty ? (
+              <div className="summary-metric-empty">
+                <span className="summary-metric-empty-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.9">
+                    <path d="M4 18h16" />
+                    <path d="M7 18v-5" />
+                    <path d="M12 18v-8" />
+                    <path d="M17 18v-3" />
+                  </svg>
+                </span>
+                <p>Coverage data will appear once FSD points are added.</p>
+              </div>
+            ) : (
+              <>
+                <div className="summary-metric summary-metric-total">
+                  <span>Total</span>
+                  <strong>{fsdCoverageCounts.total}</strong>
+                </div>
+                <div className="summary-metric summary-metric-ootb">
+                  <span>OOTB</span>
+                  <strong>
+                    {fsdCoverageCounts.ootb} ({summaryPercentages.ootb}%)
+                  </strong>
+                </div>
+                <div className="summary-metric summary-metric-partial">
+                  <span>Partial</span>
+                  <strong>
+                    {fsdCoverageCounts.partial} ({summaryPercentages.partial}%)
+                  </strong>
+                </div>
+                <div className="summary-metric summary-metric-custom">
+                  <span>Custom Dev</span>
+                  <strong>
+                    {fsdCoverageCounts.custom} ({summaryPercentages.custom}%)
+                  </strong>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="summary-insights">
@@ -2363,6 +2478,11 @@ export default function AnalyzerApp() {
             ) : (
               activeFsdSelections.map((item) => (
                 <div key={item.id} className="summary-card">
+                  {(() => {
+                    const isExpanded = expandedSummaryItemIds.has(item.id);
+                    const shouldCollapse = item.response.length > 260;
+                    return (
+                      <>
                   <div className="flex items-center justify-between">
                     <div className="flex flex-wrap items-center gap-2">
                       {item.classifications.length > 0 ? (
@@ -2400,8 +2520,21 @@ export default function AnalyzerApp() {
                     <p className="text-[0.68rem] font-semibold uppercase tracking-[0.14em] text-obsidian/55">
                       Analysis
                     </p>
-                    <p className="mt-2 text-sm text-obsidian/75">{item.response}</p>
+                    <p className={`mt-2 text-sm text-obsidian/75 summary-analysis-text ${!isExpanded && shouldCollapse ? "is-collapsed" : ""}`}>
+                      {item.response}
+                    </p>
+                    {shouldCollapse && (
+                      <button
+                        className="summary-analysis-toggle"
+                        onClick={() => toggleSummaryItemExpansion(item.id)}
+                      >
+                        {isExpanded ? "Show less" : "Show more"}
+                      </button>
+                    )}
                   </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))
             )}
@@ -2419,7 +2552,12 @@ export default function AnalyzerApp() {
                   <span className="preview-loader-text">Generating preview...</span>
                 </>
               ) : (
-                "← Preview FSD"
+                <>
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M15 18l-6-6 6-6" />
+                  </svg>
+                  <span>Preview FSD</span>
+                </>
               )}
             </button>
             {fsdPreviewDraft.trim() && (
@@ -2427,16 +2565,32 @@ export default function AnalyzerApp() {
                 <button
                   onClick={() => void handleExportDocx()}
                   disabled={loading || !fsdPreviewDraft.trim()}
-                  className="mt-2 w-full rounded-full bg-mint px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full bg-mint px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loading ? "Preparing..." : "Export FSD (.docx)"}
+                  {loading ? (
+                    "Preparing..."
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 4v10" />
+                        <path d="M8 10l4 4 4-4" />
+                        <path d="M4 20h16" />
+                      </svg>
+                      <span>Export FSD (.docx)</span>
+                    </>
+                  )}
                 </button>
                 <button
                   onClick={() => void openConfluenceModal()}
                   disabled={loading || !fsdPreviewDraft.trim()}
-                  className="mt-2 w-full rounded-full bg-signal px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full bg-signal px-4 py-3 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Save to Confluence
+                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M8 6h8l4 4v8H8V6Z" />
+                    <path d="M16 6v4h4" />
+                    <path d="M4 10h4v10h12" />
+                  </svg>
+                  <span>Save to Confluence</span>
                 </button>
               </>
             )}

@@ -766,24 +766,25 @@ body {
 
 .chat-bubble.user {
   justify-self: end;
-  @apply text-white;
-  background: linear-gradient(135deg, #2f6fdd 0%, #2c82d7 52%, #24b0bc 100%);
-  border-color: rgba(37, 99, 235, 0.35);
+  @apply text-obsidian;
+  background: rgba(241, 245, 249, 0.9);
+  border-color: rgba(37, 99, 235, 0.25);
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.07);
 }
 
 .chat-bubble.user .chat-meta,
 .chat-bubble.user .chat-text {
-  color: rgba(255, 255, 255, 0.92);
+  color: rgba(11, 18, 32, 0.82);
 }
 
 .chat-bubble.user .chat-meta {
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(11, 18, 32, 0.52);
   font-weight: 600;
   letter-spacing: 0.12em;
 }
 
 .chat-bubble.user .chat-text {
-  color: rgba(255, 255, 255, 0.96);
+  color: rgba(11, 18, 32, 0.88);
 }
 
 .chat-bubble.assistant {
@@ -797,7 +798,7 @@ body {
 }
 
 .chat-meta {
-  @apply mb-2 flex items-center justify-between text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-obsidian/50;
+  @apply mb-2 flex items-center justify-between text-[0.62rem] font-semibold uppercase tracking-[0.12em] text-obsidian/50;
 }
 
 .chat-author {
@@ -817,6 +818,45 @@ body {
 .chat-text {
   @apply text-sm leading-relaxed text-obsidian/80;
   white-space: pre-wrap;
+}
+
+.clarification-structured {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.clarification-qa-list {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.clarification-qa-item {
+  @apply rounded-xl border border-signal/25 bg-white/70 px-3 py-2;
+}
+
+.clarification-q,
+.clarification-a {
+  @apply text-sm leading-relaxed text-obsidian/80;
+}
+
+.clarification-a {
+  margin-top: 0.15rem;
+}
+
+.clarification-label {
+  @apply mr-1 inline-flex rounded-full border border-signal/25 bg-signal/10 px-1.5 py-0.5 text-[0.62rem] font-semibold uppercase tracking-[0.08em] text-signal;
+}
+
+.clarification-summary {
+  @apply rounded-xl border border-slate/30 bg-white/70 px-3 py-2;
+}
+
+.clarification-summary-label {
+  @apply text-[0.66rem] font-semibold uppercase tracking-[0.1em] text-obsidian/55;
+}
+
+.clarification-summary-text {
+  @apply mt-1 text-sm leading-relaxed text-obsidian/80;
 }
 
 .followup-inline-card {
@@ -1078,7 +1118,8 @@ body {
 }
 
 .chat-fsd-btn {
-  @apply rounded-full border border-obsidian/15 bg-white px-3 py-1 text-[0.68rem] font-semibold text-obsidian/70 transition-colors hover:border-signal/25 hover:text-obsidian disabled:cursor-not-allowed disabled:opacity-60;
+  @apply inline-flex items-center gap-1.5 rounded-full border border-obsidian/15 bg-white px-3 py-1 text-[0.68rem] font-semibold text-obsidian/70 transition-colors hover:border-signal/25 hover:text-obsidian disabled:cursor-not-allowed disabled:opacity-60;
+  line-height: 1;
 }
 
 .chat-inline-toast {
@@ -1131,25 +1172,90 @@ body {
 }
 
 .composer-send {
-  @apply rounded-full bg-signal px-4 py-2 text-xs font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-60;
+  @apply inline-flex items-center gap-1.5 rounded-full bg-signal px-4 py-2 text-xs font-semibold text-white shadow-glow disabled:cursor-not-allowed disabled:opacity-60;
 }
 
 .summary-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
 }
 
 .summary-metrics {
   @apply grid grid-cols-2 gap-2.5 border-b border-obsidian/10 p-3;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.86) 0%, rgba(245, 247, 255, 0.74) 100%);
+  row-gap: 0.5rem;
+}
+
+.summary-metrics.is-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.summary-metrics-head {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+  align-self: start;
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+}
+
+.summary-metrics-title {
+  @apply text-[0.7rem] font-semibold uppercase tracking-[0.12em] text-obsidian/70;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.summary-metrics-subtitle {
+  @apply text-[0.7rem] text-obsidian/55;
+  margin: 0;
+  line-height: 1.35;
 }
 
 .summary-metric {
-  @apply rounded-2xl border border-signal/20 bg-white px-3 py-2.5 text-xs text-obsidian/60;
+  @apply rounded-2xl border bg-white px-3 py-2.5 text-xs text-obsidian/60;
   display: flex;
   justify-content: space-between;
   align-items: center;
   box-shadow: 0 8px 16px rgba(37, 99, 235, 0.08);
+}
+
+.summary-metric-total {
+  border-color: rgba(29, 78, 216, 0.2);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.88), rgba(255, 255, 255, 0.98));
+}
+
+.summary-metric-ootb {
+  border-color: rgba(5, 150, 105, 0.24);
+  background: linear-gradient(180deg, rgba(236, 253, 245, 0.9), rgba(255, 255, 255, 0.98));
+}
+
+.summary-metric-partial {
+  border-color: rgba(217, 119, 6, 0.24);
+  background: linear-gradient(180deg, rgba(255, 247, 237, 0.9), rgba(255, 255, 255, 0.98));
+}
+
+.summary-metric-custom {
+  border-color: rgba(124, 58, 237, 0.2);
+  background: linear-gradient(180deg, rgba(245, 243, 255, 0.9), rgba(255, 255, 255, 0.98));
+}
+
+.summary-metric-empty {
+  @apply rounded-2xl border border-dashed border-obsidian/20 bg-white/75 px-3 py-3 text-center text-xs font-medium text-obsidian/60;
+  min-height: 84px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.summary-metric-empty-icon {
+  @apply inline-flex h-6 w-6 items-center justify-center rounded-full border border-signal/25 bg-signal/10 text-signal;
 }
 
 .summary-metric span {
@@ -1224,6 +1330,17 @@ body {
 .summary-card {
   @apply rounded-2xl border border-slate/30 bg-white p-3;
   box-shadow: 0 6px 16px rgba(29, 78, 216, 0.08);
+}
+
+.summary-analysis-text.is-collapsed {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.summary-analysis-toggle {
+  @apply mt-2 text-[0.68rem] font-semibold text-signal underline decoration-signal/35 underline-offset-2;
 }
 
 .summary-export {
