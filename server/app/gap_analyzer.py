@@ -123,14 +123,31 @@ def _retrieve_chunks(chroma: ChromaService, query_text: str, top_k: int) -> tupl
     top_score = 0.0
     for doc, meta, dist in zip(documents, metadatas, distances):
         score = _score_from_distance(dist)
-        top_score = max(top_score, score)
+        source = str((meta or {}).get("source") or "").lower()
+        source_id = str((meta or {}).get("source_id") or "").lower()
+        url = str((meta or {}).get("url") or "").lower()
+
+        # Prioritize official/ingested SFRA baseline evidence so it is surfaced in top chunks.
+        bonus = 0.0
+        if source == "baseline_web":
+            bonus += 0.08
+        if "developer.salesforce.com/docs/commerce/sfra" in source_id or "developer.salesforce.com/docs/commerce/sfra" in url:
+            bonus += 0.1
+        if source == "confluence" and ("fsd" in source_id or "project" in source_id):
+            bonus += 0.03
+
+        boosted_score = max(0.0, min(1.0, score + bonus))
+        top_score = max(top_score, boosted_score)
         chunks.append(
             {
                 "text": doc,
                 "metadata": meta,
-                "score": score,
+                "score": boosted_score,
+                "raw_score": score,
             }
         )
+    chunks.sort(key=lambda item: item.get("score", 0.0), reverse=True)
+    chunks = chunks[: max(top_k, 10)]
     return chunks, top_score
 
 
@@ -153,6 +170,28 @@ def _merge_chunks(existing: list[dict], incoming: list[dict], limit: int) -> lis
         merged.append(chunk)
     merged.sort(key=lambda item: item.get("score", 0.0), reverse=True)
     return merged[:limit]
+
+
+def _contains_official_sfra_evidence(chunks: list[dict]) -> bool:
+    for chunk in chunks[:6]:
+        meta = chunk.get("metadata") or {}
+        source = str(meta.get("source") or "").lower()
+        source_id = str(meta.get("source_id") or "").lower()
+        url = str(meta.get("url") or "").lower()
+        if source == "baseline_web" and (
+            "developer.salesforce.com/docs/commerce/sfra" in source_id
+            or "developer.salesforce.com/docs/commerce/sfra" in url
+        ):
+            return True
+    return False
+
+
+def _promote_classification_with_baseline_signal(classification: str, confidence: float, chunks: list[dict]) -> str:
+    # If we have strong official SFRA evidence, avoid weak/flat "Partial" outputs by default.
+    if _contains_official_sfra_evidence(chunks) and confidence >= 0.6:
+        if classification in {"Open Question", "Partial Match"}:
+            return "OOTB Match"
+    return classification
 
 
 def _generate_clarifying_questions(requirement: str, context: str) -> Optional[list[str]]:
@@ -224,6 +263,7 @@ def analyze_requirement(chroma: ChromaService, requirement: str, top_k: int) -> 
 
     confidence = _combine_confidence(similarity_confidence, llm_confidence)
     classification = _normalize_classification_with_confidence(classification, confidence)
+    classification = _promote_classification_with_baseline_signal(classification, confidence, top_chunks)
     citations = _build_citations(top_chunks)
 
     if classification == "Open Question" or confidence < 0.5:
@@ -327,6 +367,8 @@ def analyze_requirement_agentic(
                 break
 
         final_confidence = _combine_confidence(top_score, llm_confidence)
+        classification = _normalize_classification_with_confidence(classification, final_confidence)
+        classification = _promote_classification_with_baseline_signal(classification, final_confidence, working_chunks)
         citations = _build_citations(working_chunks)
 
         if not clarifying_questions and (classification == "Open Question" or final_confidence < 0.5):
