@@ -45,12 +45,11 @@ export default function GatePage() {
       <section className="mx-auto grid w-full max-w-5xl gap-5 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-3xl border border-signal/15 bg-white/90 p-6 shadow-[0_22px_48px_rgba(37,99,235,0.12)] backdrop-blur sm:p-8">
           <div className="inline-flex items-center gap-3 rounded-full border border-signal/20 bg-signal/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-signal">
-            OSF Digital Internal Access
+            Internal Access
           </div>
           <div className="mt-4 flex items-center gap-3">
             <img src="/scout-logo.png" alt="SCOUT" className="h-9 w-auto sm:h-10" />
             <div>
-              <p className="text-sm font-semibold text-obsidian/70">SCOUT</p>
               <p className="text-2xl font-semibold sm:text-3xl">Access Gate</p>
             </div>
           </div>
