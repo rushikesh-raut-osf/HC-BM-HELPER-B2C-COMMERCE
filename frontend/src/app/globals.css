@@ -242,6 +242,27 @@ body {
   min-height: 56px;
 }
 
+.history-header {
+  background:
+    radial-gradient(circle at 84% 6%, rgb(251 251 251 / 20%), transparent 50%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgb(235 241 248 / 72%) 100%);
+  border-bottom-color: rgba(100, 116, 139, 0.34);
+}
+
+.chat-panel-header {
+  background:
+    radial-gradient(circle at 84% 6%, rgb(251 251 251 / 20%), transparent 50%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgb(235 241 248 / 72%) 100%);
+  border-bottom-color: rgba(100, 116, 139, 0.34);
+}
+
+.summary-header {
+  background:
+    radial-gradient(circle at 84% 6%, rgb(251 251 251 / 20%), transparent 50%),
+    linear-gradient(180deg, rgba(248, 250, 252, 0.98) 0%, rgb(235 241 248 / 72%) 100%);
+  border-bottom-color: rgba(100, 116, 139, 0.34);
+}
+
 .history-content {
   display: flex;
   flex: 1 1 auto;
