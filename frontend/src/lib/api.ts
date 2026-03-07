@@ -67,6 +67,18 @@ export type ConfluenceFolder = {
   title: string;
 };
 
+export type WorkspaceThread = {
+  id: string;
+  title: string;
+  updated_at: string;
+  project_id?: string | null;
+  messages: Array<Record<string, unknown>>;
+};
+
+export type WorkspaceStatePayload = {
+  threads: WorkspaceThread[];
+};
+
 export async function analyzeRequirementsText(text: string, baselineName?: string) {
   const res = await fetch(`${API_BASE}/analyze`, {
     method: "POST",
@@ -330,4 +342,24 @@ export async function getConfluenceIngestStatus(jobId: string) {
     throw new Error(await res.text());
   }
   return res.json() as Promise<IngestStatusResponse>;
+}
+
+export async function fetchWorkspaceState() {
+  const res = await fetch(`${API_BASE}/workspace/state`);
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<WorkspaceStatePayload>;
+}
+
+export async function saveWorkspaceState(payload: WorkspaceStatePayload) {
+  const res = await fetch(`${API_BASE}/workspace/state`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    throw new Error(await res.text());
+  }
+  return res.json() as Promise<WorkspaceStatePayload>;
 }

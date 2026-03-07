@@ -20,6 +20,8 @@ import {
   generateFsdDocxFromText,
   ingestConfluence,
   getConfluenceIngestStatus,
+  fetchWorkspaceState,
+  saveWorkspaceState,
   startConfluenceIngest,
   saveFsdToConfluence,
   saveFsdTextToConfluence,
@@ -95,6 +97,7 @@ type ChatThread = {
   id: string;
   title: string;
   updatedAt: string;
+  projectTag?: string | null;
   messages: ChatMessage[];
 };
 
@@ -465,8 +468,19 @@ const getProjectsFromResult = (item: GapResult) => {
   return Array.from(projects);
 };
 
+const getPrimaryProjectFromResults = (results: GapResult[] = []) => {
+  for (const item of results) {
+    const projects = getProjectsFromResult(item);
+    if (projects.length > 0) return projects[0];
+  }
+  return null;
+};
+
 const getProjectsFromThread = (thread: ChatThread) => {
   const projects = new Set<string>();
+  if (thread.projectTag?.trim()) {
+    projects.add(thread.projectTag.trim());
+  }
   for (const message of thread.messages) {
     for (const item of message.analysisResults || []) {
       for (const project of getProjectsFromResult(item)) projects.add(project);
@@ -487,13 +501,14 @@ const lineToHeading = (line: string) => {
   return "";
 };
 
-const createThread = (seed?: string): ChatThread => {
+const createThread = (seed?: string, projectTag?: string | null): ChatThread => {
   const now = new Date().toISOString();
   const title = seed ? firstMeaningfulLine(seed).slice(0, 60) : "New scope discussion";
   return {
     id: crypto.randomUUID(),
     title,
     updatedAt: now,
+    projectTag: projectTag || null,
     messages: [
       {
         id: crypto.randomUUID(),
@@ -542,6 +557,7 @@ export default function AnalyzerApp() {
   const [confluenceDuplicateWarning, setConfluenceDuplicateWarning] = useState("");
   const [renamingThreadId, setRenamingThreadId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [renameProjectDraft, setRenameProjectDraft] = useState("");
   const [pendingDeleteThreadId, setPendingDeleteThreadId] = useState<string | null>(null);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   const [introAnimationThreadId, setIntroAnimationThreadId] = useState<string | null>(null);
@@ -569,6 +585,7 @@ export default function AnalyzerApp() {
   const [ingestStartedAt, setIngestStartedAt] = useState<number | null>(null);
   const [ingestStatusText, setIngestStatusText] = useState("");
   const [ingestJobId, setIngestJobId] = useState<string | null>(null);
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
 
   const historyDrawerRef = useRef<HTMLDivElement | null>(null);
   const summaryDrawerRef = useRef<HTMLDivElement | null>(null);
@@ -577,6 +594,7 @@ export default function AnalyzerApp() {
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const ingestStatusPollRef = useRef<number | null>(null);
+  const workspaceSyncTimerRef = useRef<number | null>(null);
 
   const activeThread = useMemo(
     () => threads.find((thread) => thread.id === activeThreadId) ?? threads[0],
@@ -671,12 +689,115 @@ export default function AnalyzerApp() {
     });
   }, [threadSearch, threads]);
 
+  const groupedThreads = useMemo(() => {
+    const groups = new Map<string, ChatThread[]>();
+    for (const thread of filteredThreads) {
+      const [project] = getProjectsFromThread(thread);
+      const key = project || "General";
+      const items = groups.get(key) || [];
+      items.push(thread);
+      groups.set(key, items);
+    }
+    return Array.from(groups.entries()).sort((a, b) => {
+      if (a[0] === "General") return 1;
+      if (b[0] === "General") return -1;
+      return a[0].localeCompare(b[0]);
+    });
+  }, [filteredThreads]);
+
+  const knownProjects = useMemo(() => {
+    const set = new Set<string>();
+    for (const thread of threads) {
+      for (const project of getProjectsFromThread(thread)) {
+        if (project.trim()) set.add(project.trim());
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [threads]);
+
   const closeOverlays = () => {
     setIsMobileHistoryOpen(false);
     setIsMobileSummaryOpen(false);
     setIsProfileOpen(false);
     setIsSettingsOpen(false);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadWorkspace = async () => {
+      try {
+        const payload = await fetchWorkspaceState();
+        if (cancelled) return;
+        const loadedThreads: ChatThread[] = (payload.threads || [])
+          .map((thread) => {
+            const now = thread.updated_at || new Date().toISOString();
+            const messages = Array.isArray(thread.messages)
+              ? (thread.messages.filter((item) => !!item && typeof item === "object") as ChatMessage[])
+              : [];
+            const fallbackAssistant: ChatMessage = {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              createdAt: now,
+              text: "Share your requirement scope. I will analyze SFRA coverage and highlight gaps.",
+            };
+            return {
+              id: thread.id,
+              title: thread.title || "New scope discussion",
+              updatedAt: now,
+              projectTag:
+                typeof thread.project_id === "string" && thread.project_id.trim()
+                  ? thread.project_id.trim()
+                  : null,
+              messages:
+                messages.length > 0
+                  ? messages
+                  : [fallbackAssistant],
+            };
+          })
+          .filter((thread) => !!thread.id);
+
+        if (loadedThreads.length > 0) {
+          setThreads(loadedThreads);
+          setActiveThreadId(loadedThreads[0].id);
+        }
+      } catch {
+        // Keep in-memory defaults when backend state is unavailable.
+      } finally {
+        if (!cancelled) setWorkspaceLoaded(true);
+      }
+    };
+
+    void loadWorkspace();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!workspaceLoaded) return;
+    if (workspaceSyncTimerRef.current) {
+      window.clearTimeout(workspaceSyncTimerRef.current);
+    }
+    workspaceSyncTimerRef.current = window.setTimeout(() => {
+      void saveWorkspaceState({
+        threads: threads.map((thread) => ({
+          id: thread.id,
+          title: thread.title,
+          updated_at: thread.updatedAt,
+          project_id: thread.projectTag || null,
+          messages: thread.messages as Array<Record<string, unknown>>,
+        })),
+      }).catch(() => {
+        // Keep UX non-blocking if persistence fails.
+      });
+    }, 600);
+
+    return () => {
+      if (workspaceSyncTimerRef.current) {
+        window.clearTimeout(workspaceSyncTimerRef.current);
+      }
+    };
+  }, [threads, workspaceLoaded]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -840,7 +961,7 @@ export default function AnalyzerApp() {
   };
 
   const startNewThread = () => {
-    const thread = createThread();
+    const thread = createThread(undefined, activeThread?.projectTag || null);
     setThreads((prev) => [thread, ...prev]);
     setActiveThreadId(thread.id);
     setIntroAnimationThreadId(thread.id);
@@ -860,20 +981,28 @@ export default function AnalyzerApp() {
     if (!current) return;
     setRenamingThreadId(threadId);
     setRenameDraft(current.title);
+    setRenameProjectDraft(current.projectTag || "");
   };
 
   const handleSaveThreadRename = (threadId: string) => {
     const cleaned = renameDraft.trim();
     if (!cleaned) return;
+    const cleanedProject = renameProjectDraft.trim();
     setThreads((prev) =>
       prev.map((thread) =>
         thread.id === threadId
-          ? { ...thread, title: cleaned.slice(0, 80), updatedAt: new Date().toISOString() }
+          ? {
+              ...thread,
+              title: cleaned.slice(0, 80),
+              projectTag: cleanedProject || null,
+              updatedAt: new Date().toISOString(),
+            }
           : thread
       )
     );
     setRenamingThreadId(null);
     setRenameDraft("");
+    setRenameProjectDraft("");
   };
 
   const removeThread = (threadId: string) => {
@@ -896,6 +1025,7 @@ export default function AnalyzerApp() {
     if (renamingThreadId === threadId) {
       setRenamingThreadId(null);
       setRenameDraft("");
+      setRenameProjectDraft("");
     }
   };
 
@@ -1282,6 +1412,16 @@ export default function AnalyzerApp() {
       ]);
       const payload = await analyzeSingleRequirement(consolidated);
       const primary = payload.results[0];
+      const detectedProject = getPrimaryProjectFromResults(payload.results);
+      if (detectedProject) {
+        setThreads((prev) =>
+          prev.map((thread) =>
+            thread.id === activeThread.id
+              ? { ...thread, projectTag: thread.projectTag || detectedProject, updatedAt: new Date().toISOString() }
+              : thread
+          )
+        );
+      }
       const references = primary ? getSources(primary).slice(0, 3) : [];
       const sfraBaselineReference = primary ? getSfraBaselineReference(primary) : null;
       const detailedMessage: ChatMessage = {
@@ -1842,169 +1982,190 @@ export default function AnalyzerApp() {
             </div>
 
             <div role="listbox" aria-label="Previous chats" className="history-list">
-              {filteredThreads.map((thread) => {
-                const threadProjects = getProjectsFromThread(thread);
-                return (
-                  <div
-                    key={thread.id}
-                    className={`history-thread ${thread.id === activeThread?.id ? "active" : ""}`}
-                    title={thread.title}
-                  >
-                  <button
-                    className="history-thread-main"
-                    onClick={() => {
-                      if (renamingThreadId === thread.id || pendingDeleteThreadId === thread.id) return;
-                      setActiveThreadId(thread.id);
-                      setIsMobileHistoryOpen(false);
-                    }}
-                    role="option"
-                    aria-selected={thread.id === activeThread?.id}
-                  >
-                    {deletingThreadId === thread.id ? (
-                      <div className="history-thread-danger confirm">
-                        <span className="history-thread-danger-text">Thread deleted</span>
-                      </div>
-                    ) : pendingDeleteThreadId === thread.id ? (
-                      <div className="history-thread-danger">
-                        <span className="history-thread-danger-text">Are you sure?</span>
-                        <div className="history-thread-danger-actions">
-                          <button
-                            className="history-thread-danger-yes"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              handleConfirmDeleteThread(thread.id);
-                            }}
-                            aria-label={`Confirm delete ${thread.title}`}
-                          >
-                            Yes
-                          </button>
-                          <button
-                            className="history-thread-danger-no"
-                            onClick={(event) => {
-                              event.preventDefault();
-                              event.stopPropagation();
-                              setPendingDeleteThreadId(null);
-                            }}
-                            aria-label={`Cancel delete ${thread.title}`}
-                          >
-                            No
-                          </button>
-                        </div>
-                      </div>
-                    ) : renamingThreadId === thread.id ? (
-                      <div className="history-thread-edit">
-                        <input
-                          autoFocus
-                          value={renameDraft}
-                          onChange={(event) => setRenameDraft(event.target.value)}
-                          className="history-thread-input"
-                          onKeyDown={(event) => {
-                            if (event.key === "Enter") {
-                              event.preventDefault();
-                              handleSaveThreadRename(thread.id);
-                            }
-                            if (event.key === "Escape") {
-                              event.preventDefault();
-                              setRenamingThreadId(null);
-                              setRenameDraft("");
-                            }
-                          }}
-                          aria-label="Rename thread"
-                        />
+              {groupedThreads.map(([projectGroup, groupThreads]) => (
+                <div key={`group-${projectGroup}`} className="grid gap-2">
+                  <p className="px-1 text-[0.62rem] font-semibold uppercase tracking-[0.14em] text-obsidian/45">
+                    {projectGroup}
+                  </p>
+                  {groupThreads.map((thread) => {
+                    const threadProjects = getProjectsFromThread(thread);
+                    return (
+                      <div
+                        key={thread.id}
+                        className={`history-thread ${thread.id === activeThread?.id ? "active" : ""}`}
+                        title={thread.title}
+                      >
                         <button
-                          className="history-thread-save"
-                          onClick={(event) => {
-                            event.preventDefault();
-                            event.stopPropagation();
-                            handleSaveThreadRename(thread.id);
+                          className="history-thread-main"
+                          onClick={() => {
+                            if (renamingThreadId === thread.id || pendingDeleteThreadId === thread.id) return;
+                            setActiveThreadId(thread.id);
+                            setIsMobileHistoryOpen(false);
                           }}
-                          aria-label={`Save renamed thread ${thread.title}`}
+                          role="option"
+                          aria-selected={thread.id === activeThread?.id}
                         >
-                          <svg
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                            className="h-3.5 w-3.5"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2.2"
-                          >
-                            <path d="M5 12.5l4.2 4.2L19 7" />
-                          </svg>
+                          {deletingThreadId === thread.id ? (
+                            <div className="history-thread-danger confirm">
+                              <span className="history-thread-danger-text">Thread deleted</span>
+                            </div>
+                          ) : pendingDeleteThreadId === thread.id ? (
+                            <div className="history-thread-danger">
+                              <span className="history-thread-danger-text">Are you sure?</span>
+                              <div className="history-thread-danger-actions">
+                                <button
+                                  className="history-thread-danger-yes"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    handleConfirmDeleteThread(thread.id);
+                                  }}
+                                  aria-label={`Confirm delete ${thread.title}`}
+                                >
+                                  Yes
+                                </button>
+                                <button
+                                  className="history-thread-danger-no"
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setPendingDeleteThreadId(null);
+                                  }}
+                                  aria-label={`Cancel delete ${thread.title}`}
+                                >
+                                  No
+                                </button>
+                              </div>
+                            </div>
+                          ) : renamingThreadId === thread.id ? (
+                            <div className="history-thread-edit">
+                              <input
+                                autoFocus
+                                value={renameDraft}
+                                onChange={(event) => setRenameDraft(event.target.value)}
+                                className="history-thread-input"
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    handleSaveThreadRename(thread.id);
+                                  }
+                                  if (event.key === "Escape") {
+                                    event.preventDefault();
+                                    setRenamingThreadId(null);
+                                    setRenameDraft("");
+                                    setRenameProjectDraft("");
+                                  }
+                                }}
+                                aria-label="Rename thread"
+                              />
+                              <input
+                                value={renameProjectDraft}
+                                onChange={(event) => setRenameProjectDraft(event.target.value)}
+                                className="history-thread-input"
+                                placeholder={`Project (${knownProjects[0] || "e.g. HC-Checkout"})`}
+                                aria-label="Set thread project"
+                                list="known-projects"
+                              />
+                              <button
+                                className="history-thread-save"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  handleSaveThreadRename(thread.id);
+                                }}
+                                aria-label={`Save renamed thread ${thread.title}`}
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  aria-hidden="true"
+                                  className="h-3.5 w-3.5"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2.2"
+                                >
+                                  <path d="M5 12.5l4.2 4.2L19 7" />
+                                </svg>
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="grid gap-1">
+                              <span className="history-thread-title">{thread.title}</span>
+                              {threadProjects.length > 0 && (
+                                <div className="history-thread-projects">
+                                  {threadProjects.slice(0, 2).map((project) => (
+                                    <span key={`${thread.id}-project-${project}`} className="history-thread-project-chip">
+                                      {project}
+                                    </span>
+                                  ))}
+                                  {threadProjects.length > 2 && (
+                                    <span className="history-thread-project-more">+{threadProjects.length - 2}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </button>
-                      </div>
-                    ) : (
-                      <div className="grid gap-1">
-                        <span className="history-thread-title">{thread.title}</span>
-                        {threadProjects.length > 0 && (
-                          <div className="history-thread-projects">
-                            {threadProjects.slice(0, 2).map((project) => (
-                              <span key={`${thread.id}-project-${project}`} className="history-thread-project-chip">
-                                {project}
-                              </span>
-                            ))}
-                            {threadProjects.length > 2 && (
-                              <span className="history-thread-project-more">+{threadProjects.length - 2}</span>
+                        {!isHistoryCollapsed && pendingDeleteThreadId !== thread.id && deletingThreadId !== thread.id && (
+                          <div className="history-thread-meta">
+                            <span className="history-thread-time">{formatDateTime(thread.updatedAt)}</span>
+                            {renamingThreadId !== thread.id && (
+                              <div className="history-thread-links">
+                                <button
+                                  className="history-thread-icon-btn"
+                                  onClick={() => handleRenameThread(thread.id)}
+                                  aria-label={`Rename ${thread.title}`}
+                                  title="Rename"
+                                >
+                                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5">
+                                    <path
+                                      d="M4 20h4l10-10-4-4L4 16v4Z"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.9"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                    <path
+                                      d="M12.8 7.2l4 4"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.9"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  className="history-thread-icon-btn delete"
+                                  onClick={() => handleDeleteThread(thread.id)}
+                                  aria-label={`Delete ${thread.title}`}
+                                  title="Delete"
+                                >
+                                  <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5">
+                                    <path
+                                      d="M5 7h14M9 7V5h6v2m-7 0 1 12h6l1-12"
+                                      fill="none"
+                                      stroke="currentColor"
+                                      strokeWidth="1.9"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                              </div>
                             )}
                           </div>
                         )}
                       </div>
-                    )}
-                  </button>
-                  {!isHistoryCollapsed && pendingDeleteThreadId !== thread.id && deletingThreadId !== thread.id && (
-                    <div className="history-thread-meta">
-                      <span className="history-thread-time">{formatDateTime(thread.updatedAt)}</span>
-                      {renamingThreadId !== thread.id && (
-                        <div className="history-thread-links">
-                          <button
-                            className="history-thread-icon-btn"
-                            onClick={() => handleRenameThread(thread.id)}
-                            aria-label={`Rename ${thread.title}`}
-                            title="Rename"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5">
-                              <path
-                                d="M4 20h4l10-10-4-4L4 16v4Z"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.9"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                              <path
-                                d="M12.8 7.2l4 4"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.9"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            className="history-thread-icon-btn delete"
-                            onClick={() => handleDeleteThread(thread.id)}
-                            aria-label={`Delete ${thread.title}`}
-                            title="Delete"
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5">
-                              <path
-                                d="M5 7h14M9 7V5h6v2m-7 0 1 12h6l1-12"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.9"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              ))}
+              <datalist id="known-projects">
+                {knownProjects.map((project) => (
+                  <option key={`known-project-${project}`} value={project} />
+                ))}
+              </datalist>
               {filteredThreads.length === 0 && (
                 <div className="history-thread-empty">No matching threads or projects.</div>
               )}
@@ -2068,7 +2229,7 @@ export default function AnalyzerApp() {
                     <div className="fsd-preview-editor" data-color-mode="light">
                       <MDEditor
                         value={fsdPreviewDraft}
-                        onChange={(value) => setFsdPreviewDraft(value || "")}
+                        onChange={(value?: string) => setFsdPreviewDraft(value || "")}
                         preview="edit"
                         height={420}
                         visibleDragbar={false}

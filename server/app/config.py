@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     chroma_persist_path: str = "./data/chroma"
     chroma_collection: str = ""
     baseline_dir: str = "./.state/baselines"
+    thread_db_path: str = "./data/workspace.db"
     rerank_enabled: bool = True
     rerank_candidates: int = 45
     rerank_lexical_weight: float = 0.25

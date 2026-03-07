@@ -195,3 +195,15 @@ class IngestStatusResponse(BaseModel):
     started_at: Optional[float] = None
     finished_at: Optional[float] = None
     error: Optional[str] = None
+
+
+class WorkspaceThread(BaseModel):
+    id: str
+    title: str
+    updated_at: str
+    project_id: Optional[str] = None
+    messages: list[dict] = Field(default_factory=list)
+
+
+class WorkspaceStatePayload(BaseModel):
+    threads: list[WorkspaceThread] = Field(default_factory=list)

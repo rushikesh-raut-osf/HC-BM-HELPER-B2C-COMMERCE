@@ -67,14 +67,17 @@ from .schemas import (
     IngestStartRequest,
     IngestStartResponse,
     IngestStatusResponse,
+    WorkspaceStatePayload,
 )
 from .baseline_store import compare_to_baseline, load_baseline, save_baseline
+from .thread_store import init_workspace_db, load_workspace_state, save_workspace_state
 
 
 app = FastAPI(title="SFRA AI Agent API", version="0.2.0")
 chroma = ChromaService()
 ingest_jobs: dict[str, dict] = {}
 ingest_jobs_lock = threading.Lock()
+init_workspace_db()
 
 FALLBACK_FOLLOWUP_STEPS = [
     {
@@ -568,6 +571,21 @@ def _run_ingest_job(job_id: str) -> None:
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/workspace/state", response_model=WorkspaceStatePayload)
+def workspace_state_get():
+    state = load_workspace_state()
+    return WorkspaceStatePayload(**state)
+
+
+@app.post("/workspace/state", response_model=WorkspaceStatePayload)
+def workspace_state_save(payload: WorkspaceStatePayload):
+    latest = "1970-01-01T00:00:00.000Z"
+    if payload.threads:
+        latest = max((item.updated_at for item in payload.threads), default=latest)
+    saved = save_workspace_state(payload.model_dump(), latest)
+    return WorkspaceStatePayload(**saved)
 
 
 @app.post("/query", response_model=QueryResponse)
