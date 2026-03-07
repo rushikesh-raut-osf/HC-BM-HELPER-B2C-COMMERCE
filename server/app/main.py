@@ -137,41 +137,68 @@ def fsd_text_to_confluence_html(title: str, fsd_text: str) -> str:
     body_parts: list[str] = []
     in_toc_section = False
     inserted_toc_macro = False
-    for raw_line in fsd_text.splitlines():
-        line = raw_line.strip()
+    lines = fsd_text.splitlines()
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx].strip()
         if not line:
+            idx += 1
             continue
         if line.lower() in {"table of contents", "# table of contents"}:
             if not inserted_toc_macro:
                 body_parts.append('<ac:structured-macro ac:name="toc"><ac:parameter ac:name="maxLevel">3</ac:parameter></ac:structured-macro>')
                 inserted_toc_macro = True
             in_toc_section = True
+            idx += 1
             continue
         if in_toc_section:
             # Skip markdown TOC lines; Confluence TOC macro renders real heading links.
             if line.startswith("#"):
                 in_toc_section = False
             else:
+                idx += 1
+                continue
+        if line.startswith("|") and idx + 1 < len(lines):
+            separator = lines[idx + 1].strip()
+            if separator.startswith("|") and re.search(r"-", separator):
+                header_cells = [html.escape(cell.strip()) for cell in line.strip("|").split("|")]
+                row_html: list[str] = []
+                idx += 2
+                while idx < len(lines):
+                    row_line = lines[idx].strip()
+                    if not row_line.startswith("|"):
+                        break
+                    cells = [html.escape(cell.strip()) for cell in row_line.strip("|").split("|")]
+                    if cells:
+                        row_html.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+                    idx += 1
+                header_html = "".join(f"<th>{cell}</th>" for cell in header_cells)
+                body_parts.append("<table><thead><tr>" + header_html + "</tr></thead><tbody>" + "".join(row_html) + "</tbody></table>")
                 continue
         if line.startswith("#"):
             level = min(3, len(line) - len(line.lstrip("#")))
             heading = html.escape(line.lstrip("#").strip())
             if heading:
                 body_parts.append(f"<h{level + 1}>{heading}</h{level + 1}>")
+            idx += 1
             continue
         if re.match(r"^[-*]\s+", line):
             bullet = html.escape(re.sub(r"^[-*]\s+", "", line))
             body_parts.append(f"<ul><li>{bullet}</li></ul>")
+            idx += 1
             continue
         if re.match(r"^\d+\.\s+", line):
             numbered = html.escape(re.sub(r"^\d+\.\s+", "", line))
             body_parts.append(f"<ol><li>{numbered}</li></ol>")
+            idx += 1
             continue
         if line.endswith(":") and len(line) < 140:
             heading = html.escape(line[:-1].strip())
             body_parts.append(f"<h2>{heading}</h2>")
+            idx += 1
             continue
         body_parts.append(f"<p>{html.escape(line)}</p>")
+        idx += 1
     return f"<h1>{html.escape(title)}</h1>{''.join(body_parts)}"
 
 

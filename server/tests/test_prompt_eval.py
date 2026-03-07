@@ -63,3 +63,36 @@ def test_generate_fsd_json_parses_known_samples(monkeypatch):
     fsd_json = fsd_generator.generate_fsd_json(gap_results)
     assert fsd_json["Overview"] == response_payload["Overview"]
     assert fsd_json["Open Questions"] == response_payload["Open Questions"]
+
+
+def test_render_fsd_text_includes_functional_spec_table():
+    fsd_json = {
+        "Overview": ["Checkout enhancements"],
+        "Background - Scope": ["PDP and cart"],
+        "Background - Out of Scope": ["OMS integrations"],
+        "Functional Specification - General Requirements": [
+            "Viewport: All Viewports || Visual Reference: PDP mockup badge || Element: Product badge on PDP || Element Functionality: 1. Add badge on top of PDP image 2. Fix badge at top right 3. Allow max 3 badges",
+        ],
+        "Functional Specification - Visual Requirements": [],
+        "Functional Specification - Error Handling": [],
+    }
+
+    rendered = fsd_generator.render_fsd_text(fsd_json)
+
+    assert "| Sl No | Viewport | Visual Reference | Element | Element Functionality |" in rendered
+    assert "| 1 | All Viewports | PDP mockup badge | Product badge on PDP | 1. Add badge on top of PDP image 2. Fix badge at top right 3. Allow max 3 badges |" in rendered
+
+
+def test_render_fsd_text_functional_row_fallbacks():
+    fsd_json = {
+        "Overview": [],
+        "Background - Scope": [],
+        "Background - Out of Scope": [],
+        "Functional Specification - General Requirements": ["Product badge on PDP image"],
+        "Functional Specification - Visual Requirements": [],
+        "Functional Specification - Error Handling": [],
+    }
+
+    rendered = fsd_generator.render_fsd_text(fsd_json)
+
+    assert "| 1 | All Viewports | TBD screenshot | Product badge on PDP image | 1. Product badge on PDP image |" in rendered

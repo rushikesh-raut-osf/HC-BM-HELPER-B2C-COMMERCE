@@ -29,6 +29,13 @@ def build_fsd_prompt(gap_results: list[dict]) -> str:
         "Rules:\n"
         "- Do not include Markdown or code fences.\n"
         "- Each value must be a list of short bullet strings.\n"
+        "- Functional Specification rows are mandatory and must describe sequential flow by topic/step.\n"
+        "- For Functional Specification sections, every list item MUST use this exact field pattern: "
+        "Viewport: <value> || Visual Reference: <value> || Element: <value> || "
+        "Element Functionality: 1. <step> 2. <step> ...\n"
+        "- Viewport should be explicit (All Viewports, Desktop only, Tablet only, Mobile only, etc.).\n"
+        "- Visual Reference should mention mockup/screenshot/wireframe reference; use 'TBD screenshot' when unknown.\n"
+        "- Element Functionality must always be numbered and sequential.\n"
         "- If a section has no content, return an empty list.\n\n"
         f"Gap Analysis Results:\n{gap_results}\n"
     )
