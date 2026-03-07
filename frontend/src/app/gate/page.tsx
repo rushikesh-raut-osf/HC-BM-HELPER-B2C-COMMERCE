@@ -62,7 +62,7 @@ export default function GatePage() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               className="w-full rounded-2xl border border-obsidian/15 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-signal/35"
-              placeholder="name@osf.digital"
+              placeholder="Email"
               type="email"
               autoComplete="email"
               onKeyDown={(event) => {
