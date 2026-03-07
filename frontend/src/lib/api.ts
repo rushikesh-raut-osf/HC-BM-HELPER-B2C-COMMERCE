@@ -344,18 +344,20 @@ export async function getConfluenceIngestStatus(jobId: string) {
   return res.json() as Promise<IngestStatusResponse>;
 }
 
-export async function fetchWorkspaceState() {
-  const res = await fetch(`${API_BASE}/workspace/state`);
+export async function fetchWorkspaceState(userEmail: string) {
+  const res = await fetch(`${API_BASE}/workspace/state`, {
+    headers: { "x-user-email": userEmail },
+  });
   if (!res.ok) {
     throw new Error(await res.text());
   }
   return res.json() as Promise<WorkspaceStatePayload>;
 }
 
-export async function saveWorkspaceState(payload: WorkspaceStatePayload) {
+export async function saveWorkspaceState(payload: WorkspaceStatePayload, userEmail: string) {
   const res = await fetch(`${API_BASE}/workspace/state`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", "x-user-email": userEmail },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {

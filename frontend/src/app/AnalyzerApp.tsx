@@ -585,6 +585,7 @@ export default function AnalyzerApp() {
   const [ingestStartedAt, setIngestStartedAt] = useState<number | null>(null);
   const [ingestStatusText, setIngestStatusText] = useState("");
   const [ingestJobId, setIngestJobId] = useState<string | null>(null);
+  const [sessionEmail, setSessionEmail] = useState("");
   const [workspaceLoaded, setWorkspaceLoaded] = useState(false);
 
   const historyDrawerRef = useRef<HTMLDivElement | null>(null);
@@ -724,9 +725,29 @@ export default function AnalyzerApp() {
 
   useEffect(() => {
     let cancelled = false;
+    const loadSession = async () => {
+      try {
+        const res = await fetch("/api/gate/me");
+        if (!res.ok) return;
+        const payload = (await res.json()) as { email?: string };
+        const email = (payload.email || "").trim().toLowerCase();
+        if (!cancelled) setSessionEmail(email);
+      } catch {
+        // Keep empty session email on failure.
+      }
+    };
+    void loadSession();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sessionEmail) return;
+    let cancelled = false;
     const loadWorkspace = async () => {
       try {
-        const payload = await fetchWorkspaceState();
+        const payload = await fetchWorkspaceState(sessionEmail);
         if (cancelled) return;
         const loadedThreads: ChatThread[] = (payload.threads || [])
           .map((thread) => {
@@ -771,10 +792,10 @@ export default function AnalyzerApp() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [sessionEmail]);
 
   useEffect(() => {
-    if (!workspaceLoaded) return;
+    if (!workspaceLoaded || !sessionEmail) return;
     if (workspaceSyncTimerRef.current) {
       window.clearTimeout(workspaceSyncTimerRef.current);
     }
@@ -787,7 +808,7 @@ export default function AnalyzerApp() {
           project_id: thread.projectTag || null,
           messages: thread.messages as Array<Record<string, unknown>>,
         })),
-      }).catch(() => {
+      }, sessionEmail).catch(() => {
         // Keep UX non-blocking if persistence fails.
       });
     }, 600);
@@ -797,7 +818,7 @@ export default function AnalyzerApp() {
         window.clearTimeout(workspaceSyncTimerRef.current);
       }
     };
-  }, [threads, workspaceLoaded]);
+  }, [threads, workspaceLoaded, sessionEmail]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
@@ -574,17 +574,23 @@ def health():
 
 
 @app.get("/workspace/state", response_model=WorkspaceStatePayload)
-def workspace_state_get():
-    state = load_workspace_state()
+def workspace_state_get(x_user_email: str | None = Header(default=None)):
+    user_email = (x_user_email or "").strip().lower()
+    if not user_email:
+        raise HTTPException(status_code=400, detail="x-user-email header is required")
+    state = load_workspace_state(user_email)
     return WorkspaceStatePayload(**state)
 
 
 @app.post("/workspace/state", response_model=WorkspaceStatePayload)
-def workspace_state_save(payload: WorkspaceStatePayload):
+def workspace_state_save(payload: WorkspaceStatePayload, x_user_email: str | None = Header(default=None)):
+    user_email = (x_user_email or "").strip().lower()
+    if not user_email:
+        raise HTTPException(status_code=400, detail="x-user-email header is required")
     latest = "1970-01-01T00:00:00.000Z"
     if payload.threads:
         latest = max((item.updated_at for item in payload.threads), default=latest)
-    saved = save_workspace_state(payload.model_dump(), latest)
+    saved = save_workspace_state(user_email, payload.model_dump(), latest)
     return WorkspaceStatePayload(**saved)
 
 

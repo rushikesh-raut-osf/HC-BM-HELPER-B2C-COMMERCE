@@ -25,8 +25,8 @@ def init_workspace_db() -> None:
     with _connect() as conn:
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS workspace_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
+            CREATE TABLE IF NOT EXISTS workspace_state_user (
+                user_email TEXT PRIMARY KEY,
                 payload_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
@@ -34,10 +34,18 @@ def init_workspace_db() -> None:
         )
 
 
-def load_workspace_state() -> dict[str, Any]:
+def _normalize_user_email(user_email: str) -> str:
+    return user_email.strip().lower()
+
+
+def load_workspace_state(user_email: str) -> dict[str, Any]:
+    normalized_email = _normalize_user_email(user_email)
     init_workspace_db()
     with _connect() as conn:
-        row = conn.execute("SELECT payload_json FROM workspace_state WHERE id = 1").fetchone()
+        row = conn.execute(
+            "SELECT payload_json FROM workspace_state_user WHERE user_email = ?",
+            (normalized_email,),
+        ).fetchone()
         if not row:
             return {"threads": []}
         try:
@@ -52,19 +60,20 @@ def load_workspace_state() -> dict[str, Any]:
     return {"threads": threads}
 
 
-def save_workspace_state(state: dict[str, Any], updated_at: str) -> dict[str, Any]:
+def save_workspace_state(user_email: str, state: dict[str, Any], updated_at: str) -> dict[str, Any]:
+    normalized_email = _normalize_user_email(user_email)
     payload = {"threads": state.get("threads", [])}
     serialized = json.dumps(payload, ensure_ascii=True)
     init_workspace_db()
     with _connect() as conn:
         conn.execute(
             """
-            INSERT INTO workspace_state (id, payload_json, updated_at)
-            VALUES (1, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
+            INSERT INTO workspace_state_user (user_email, payload_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(user_email) DO UPDATE SET
                 payload_json = excluded.payload_json,
                 updated_at = excluded.updated_at
             """,
-            (serialized, updated_at),
+            (normalized_email, serialized, updated_at),
         )
     return payload
