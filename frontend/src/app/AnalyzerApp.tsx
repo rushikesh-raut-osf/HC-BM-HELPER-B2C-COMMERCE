@@ -2091,32 +2091,6 @@ export default function AnalyzerApp() {
                   </button>
                 </div>
               )}
-              <div className="history-create-row">
-                <input
-                  value={newThreadProjectDraft}
-                  onChange={(event) => setNewThreadProjectDraft(event.target.value)}
-                  className="history-search-input"
-                  placeholder="Project (e.g. SFCC)"
-                  aria-label="New thread project"
-                  list="known-projects"
-                />
-                <input
-                  value={newThreadTitleDraft}
-                  onChange={(event) => setNewThreadTitleDraft(event.target.value)}
-                  className="history-search-input"
-                  placeholder="Thread title (e.g. Product carousel)"
-                  aria-label="New thread title"
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      startNewThread();
-                    }
-                  }}
-                />
-                <button className="history-project-filter-chip active" onClick={startNewThread} type="button">
-                  Create
-                </button>
-              </div>
               <div className="history-project-filters">
                 {["All", ...knownProjects].map((project) => (
                   <button
