@@ -18,7 +18,7 @@ def test_health():
 
 
 def test_analyze_text(monkeypatch):
-    def fake_query(_question, _top_k):
+    def fake_query(_question, _top_k, where_filter=None):
         return {
             "documents": [["doc chunk"]],
             "metadatas": [[{"source": "confluence"}]],
