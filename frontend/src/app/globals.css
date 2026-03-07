@@ -245,6 +245,28 @@ body {
   @apply w-full rounded-xl border border-obsidian/15 bg-white px-3 py-2 text-xs text-obsidian/75 focus:outline-none focus:ring-2 focus:ring-signal/30;
 }
 
+.history-project-filters {
+  margin-top: 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.history-create-row {
+  margin-top: 0.5rem;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.35rem;
+}
+
+.history-project-filter-chip {
+  @apply rounded-full border border-obsidian/15 bg-white px-2.5 py-1 text-[0.62rem] font-semibold text-obsidian/65 transition-colors;
+}
+
+.history-project-filter-chip.active {
+  @apply border-signal/35 bg-signal/12 text-signal;
+}
+
 .history-list {
   display: grid;
   grid-auto-rows: max-content;
@@ -427,13 +449,33 @@ body {
 }
 
 .history-thread-edit {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  display: grid;
+  gap: 0.34rem;
+  width: 100%;
+}
+
+.history-thread-edit-label {
+  @apply text-[0.6rem] font-semibold uppercase tracking-[0.08em] text-obsidian/55;
 }
 
 .history-thread-input {
   @apply min-w-0 w-full rounded-xl border border-signal/30 bg-white px-2 py-1 text-sm font-semibold text-obsidian focus:outline-none focus:ring-2 focus:ring-signal/30;
+}
+
+.history-thread-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.35rem;
+  margin-top: 0.15rem;
+}
+
+.history-thread-save-text {
+  @apply rounded-full border border-signal/30 bg-signal/10 px-2.5 py-1 text-[0.68rem] font-semibold text-signal;
+}
+
+.history-thread-cancel-text {
+  @apply rounded-full border border-obsidian/20 bg-white px-2.5 py-1 text-[0.68rem] font-semibold text-obsidian/65;
 }
 
 .history-thread-save {

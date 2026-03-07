@@ -468,14 +468,6 @@ const getProjectsFromResult = (item: GapResult) => {
   return Array.from(projects);
 };
 
-const getPrimaryProjectFromResults = (results: GapResult[] = []) => {
-  for (const item of results) {
-    const projects = getProjectsFromResult(item);
-    if (projects.length > 0) return projects[0];
-  }
-  return null;
-};
-
 const getProjectsFromThread = (thread: ChatThread) => {
   const projects = new Set<string>();
   if (thread.projectTag?.trim()) {
@@ -488,6 +480,8 @@ const getProjectsFromThread = (thread: ChatThread) => {
   }
   return Array.from(projects);
 };
+
+const getPrimaryThreadProject = (thread: ChatThread) => thread.projectTag?.trim() || "No Project";
 
 const lineToHeading = (line: string) => {
   const trimmed = line.trim();
@@ -571,6 +565,9 @@ export default function AnalyzerApp() {
     messageId: string;
   } | null>(null);
   const [threadSearch, setThreadSearch] = useState("");
+  const [projectFilter, setProjectFilter] = useState<string>("All");
+  const [newThreadTitleDraft, setNewThreadTitleDraft] = useState("");
+  const [newThreadProjectDraft, setNewThreadProjectDraft] = useState("");
   const [expandedAnalysisKeys, setExpandedAnalysisKeys] = useState<Set<string>>(new Set());
   const [expandedSummaryItemIds, setExpandedSummaryItemIds] = useState<Set<string>>(new Set());
   const [baselineLinks, setBaselineLinks] = useState<DataSourceLink[]>(DEFAULT_BASELINE_LINKS);
@@ -690,21 +687,25 @@ export default function AnalyzerApp() {
     });
   }, [threadSearch, threads]);
 
+  const projectFilteredThreads = useMemo(() => {
+    if (projectFilter === "All") return filteredThreads;
+    return filteredThreads.filter((thread) => getPrimaryThreadProject(thread) === projectFilter);
+  }, [filteredThreads, projectFilter]);
+
   const groupedThreads = useMemo(() => {
     const groups = new Map<string, ChatThread[]>();
-    for (const thread of filteredThreads) {
-      const [project] = getProjectsFromThread(thread);
-      const key = project || "General";
+    for (const thread of projectFilteredThreads) {
+      const key = getPrimaryThreadProject(thread);
       const items = groups.get(key) || [];
       items.push(thread);
       groups.set(key, items);
     }
     return Array.from(groups.entries()).sort((a, b) => {
-      if (a[0] === "General") return 1;
-      if (b[0] === "General") return -1;
+      if (a[0] === "No Project") return 1;
+      if (b[0] === "No Project") return -1;
       return a[0].localeCompare(b[0]);
     });
-  }, [filteredThreads]);
+  }, [projectFilteredThreads]);
 
   const knownProjects = useMemo(() => {
     const set = new Set<string>();
@@ -712,6 +713,9 @@ export default function AnalyzerApp() {
       for (const project of getProjectsFromThread(thread)) {
         if (project.trim()) set.add(project.trim());
       }
+    }
+    if (threads.some((thread) => !thread.projectTag?.trim())) {
+      set.add("No Project");
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b));
   }, [threads]);
@@ -982,10 +986,18 @@ export default function AnalyzerApp() {
   };
 
   const startNewThread = () => {
-    const thread = createThread(undefined, activeThread?.projectTag || null);
+    const cleanedTitle = newThreadTitleDraft.trim();
+    const cleanedProject = newThreadProjectDraft.trim();
+    const fallbackProject =
+      projectFilter !== "All" && projectFilter !== "No Project"
+        ? projectFilter
+        : activeThread?.projectTag || null;
+    const thread = createThread(cleanedTitle || undefined, cleanedProject || fallbackProject);
     setThreads((prev) => [thread, ...prev]);
     setActiveThreadId(thread.id);
     setIntroAnimationThreadId(thread.id);
+    setNewThreadTitleDraft("");
+    setNewThreadProjectDraft("");
     setComposer("");
     setAttachments([]);
     setError("");
@@ -1433,16 +1445,6 @@ export default function AnalyzerApp() {
       ]);
       const payload = await analyzeSingleRequirement(consolidated);
       const primary = payload.results[0];
-      const detectedProject = getPrimaryProjectFromResults(payload.results);
-      if (detectedProject) {
-        setThreads((prev) =>
-          prev.map((thread) =>
-            thread.id === activeThread.id
-              ? { ...thread, projectTag: thread.projectTag || detectedProject, updatedAt: new Date().toISOString() }
-              : thread
-          )
-        );
-      }
       const references = primary ? getSources(primary).slice(0, 3) : [];
       const sfraBaselineReference = primary ? getSfraBaselineReference(primary) : null;
       const detailedMessage: ChatMessage = {
@@ -2000,6 +2002,44 @@ export default function AnalyzerApp() {
                 placeholder="Search thread or project..."
                 aria-label="Search threads by project or title"
               />
+              <div className="history-create-row">
+                <input
+                  value={newThreadProjectDraft}
+                  onChange={(event) => setNewThreadProjectDraft(event.target.value)}
+                  className="history-search-input"
+                  placeholder="Project (e.g. SFCC)"
+                  aria-label="New thread project"
+                  list="known-projects"
+                />
+                <input
+                  value={newThreadTitleDraft}
+                  onChange={(event) => setNewThreadTitleDraft(event.target.value)}
+                  className="history-search-input"
+                  placeholder="Thread title (e.g. Product carousel)"
+                  aria-label="New thread title"
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      startNewThread();
+                    }
+                  }}
+                />
+                <button className="history-project-filter-chip active" onClick={startNewThread} type="button">
+                  Create
+                </button>
+              </div>
+              <div className="history-project-filters">
+                {["All", ...knownProjects].map((project) => (
+                  <button
+                    key={`project-filter-${project}`}
+                    className={`history-project-filter-chip ${projectFilter === project ? "active" : ""}`}
+                    onClick={() => setProjectFilter(project)}
+                    type="button"
+                  >
+                    {project}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div role="listbox" aria-label="Previous chats" className="history-list">
@@ -2016,10 +2056,70 @@ export default function AnalyzerApp() {
                         className={`history-thread ${thread.id === activeThread?.id ? "active" : ""}`}
                         title={thread.title}
                       >
+                        {renamingThreadId === thread.id ? (
+                          <div className="history-thread-edit">
+                            <label className="history-thread-edit-label">Thread title</label>
+                            <input
+                              autoFocus
+                              value={renameDraft}
+                              onChange={(event) => setRenameDraft(event.target.value)}
+                              className="history-thread-input"
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  handleSaveThreadRename(thread.id);
+                                }
+                                if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  setRenamingThreadId(null);
+                                  setRenameDraft("");
+                                  setRenameProjectDraft("");
+                                }
+                              }}
+                              aria-label="Rename thread"
+                            />
+                            <label className="history-thread-edit-label">Project</label>
+                            <input
+                              value={renameProjectDraft}
+                              onChange={(event) => setRenameProjectDraft(event.target.value)}
+                              className="history-thread-input"
+                              placeholder="SFCC / SFDC / Custom"
+                              aria-label="Set thread project"
+                              list="known-projects"
+                            />
+                            <div className="history-thread-edit-actions">
+                              <button
+                                className="history-thread-save-text"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  handleSaveThreadRename(thread.id);
+                                }}
+                                aria-label={`Save renamed thread ${thread.title}`}
+                                type="button"
+                              >
+                                Save
+                              </button>
+                              <button
+                                className="history-thread-cancel-text"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  setRenamingThreadId(null);
+                                  setRenameDraft("");
+                                  setRenameProjectDraft("");
+                                }}
+                                type="button"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
                         <button
                           className="history-thread-main"
                           onClick={() => {
-                            if (renamingThreadId === thread.id || pendingDeleteThreadId === thread.id) return;
+                            if (pendingDeleteThreadId === thread.id) return;
                             setActiveThreadId(thread.id);
                             setIsMobileHistoryOpen(false);
                           }}
@@ -2058,62 +2158,14 @@ export default function AnalyzerApp() {
                                 </button>
                               </div>
                             </div>
-                          ) : renamingThreadId === thread.id ? (
-                            <div className="history-thread-edit">
-                              <input
-                                autoFocus
-                                value={renameDraft}
-                                onChange={(event) => setRenameDraft(event.target.value)}
-                                className="history-thread-input"
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter") {
-                                    event.preventDefault();
-                                    handleSaveThreadRename(thread.id);
-                                  }
-                                  if (event.key === "Escape") {
-                                    event.preventDefault();
-                                    setRenamingThreadId(null);
-                                    setRenameDraft("");
-                                    setRenameProjectDraft("");
-                                  }
-                                }}
-                                aria-label="Rename thread"
-                              />
-                              <input
-                                value={renameProjectDraft}
-                                onChange={(event) => setRenameProjectDraft(event.target.value)}
-                                className="history-thread-input"
-                                placeholder={`Project (${knownProjects[0] || "e.g. HC-Checkout"})`}
-                                aria-label="Set thread project"
-                                list="known-projects"
-                              />
-                              <button
-                                className="history-thread-save"
-                                onClick={(event) => {
-                                  event.preventDefault();
-                                  event.stopPropagation();
-                                  handleSaveThreadRename(thread.id);
-                                }}
-                                aria-label={`Save renamed thread ${thread.title}`}
-                              >
-                                <svg
-                                  viewBox="0 0 24 24"
-                                  aria-hidden="true"
-                                  className="h-3.5 w-3.5"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="2.2"
-                                >
-                                  <path d="M5 12.5l4.2 4.2L19 7" />
-                                </svg>
-                              </button>
-                            </div>
                           ) : (
                             <div className="grid gap-1">
                               <span className="history-thread-title">{thread.title}</span>
-                              {threadProjects.length > 0 && (
+                              {(thread.projectTag || threadProjects.length > 0) && (
                                 <div className="history-thread-projects">
-                                  {threadProjects.slice(0, 2).map((project) => (
+                                  {[getPrimaryThreadProject(thread), ...threadProjects.filter((p) => p !== getPrimaryThreadProject(thread))]
+                                    .slice(0, 2)
+                                    .map((project) => (
                                     <span key={`${thread.id}-project-${project}`} className="history-thread-project-chip">
                                       {project}
                                     </span>
@@ -2126,6 +2178,7 @@ export default function AnalyzerApp() {
                             </div>
                           )}
                         </button>
+                        )}
                         {!isHistoryCollapsed && pendingDeleteThreadId !== thread.id && deletingThreadId !== thread.id && (
                           <div className="history-thread-meta">
                             <span className="history-thread-time">{formatDateTime(thread.updatedAt)}</span>
