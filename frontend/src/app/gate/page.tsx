@@ -41,7 +41,7 @@ export default function GatePage() {
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-b from-[#eef3ff] via-[#f6f9ff] to-[#ecf8f7] px-4 py-8 text-obsidian sm:px-6">
+    <main className="min-h-screen bg-gradient-to-b from-[#eef3ff] via-[#f6f9ff] to-[#ecf8f7] px-4 py-8 text-obsidian sm:px-6 lg:flex lg:items-center lg:justify-center">
       <section className="mx-auto grid w-full max-w-5xl gap-5 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-3xl border border-signal/15 bg-white/90 p-6 shadow-[0_22px_48px_rgba(37,99,235,0.12)] backdrop-blur sm:p-8">
           <div className="inline-flex items-center gap-3 rounded-full border border-signal/20 bg-signal/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-signal">
