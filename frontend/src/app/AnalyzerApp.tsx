@@ -123,7 +123,38 @@ const STARTER_PROMPTS = [
 const GUIDED_MAX_STEPS = 3;
 const DATA_SOURCE_STORAGE_KEY = "scout.dataSources.v1";
 const DEFAULT_PROJECT_NAME = "General";
-const DEFAULT_BASELINE_LINKS: DataSourceLink[] = [];
+const DEFAULT_BASELINE_LINKS: DataSourceLink[] = [
+  {
+    id: "sfcc-rhino-inquisitor",
+    url: "https://www.rhino-inquisitor.com/salesforce-b2c-commerce-cloud-documentation/",
+    note: "Complete SFCC documentation overview. Crawl navigation and related in-content links.",
+  },
+  {
+    id: "sfcc-help-overview",
+    url: "https://help.salesforce.com/s/articleView?id=cc.b2c_getting_started.htm&type=5",
+    note: "B2C Commerce overview baseline. crawl complete TOC hierarchy, subpages, and related links.",
+  },
+  {
+    id: "sfcc-infocenter",
+    url: "https://sfcclearning.com/infocenter/",
+    note: "Supplementary infocenter baseline. Crawl section navigation and linked related content.",
+  },
+  {
+    id: "sfra-feature-list",
+    url: "https://developer.salesforce.com/docs/commerce/sfra/guide/sfra-feature-list.html",
+    note: "Primary SFRA feature coverage baseline; include linked SFRA subpages.",
+  },
+  {
+    id: "bm-merchandising",
+    url: "https://help.salesforce.com/s/articleView?id=cc.b2c_merchandising_your_site.htm&type=5",
+    note: "Business Manager feature baseline; include related subpages.",
+  },
+  {
+    id: "sfra-learn-more",
+    url: "https://developer.salesforce.com/docs/commerce/sfra/guide/sfra-learn-more.html",
+    note: "Technical implementation baseline; include linked SFRA technical pages.",
+  },
+];
 
 const FALLBACK_GUIDED_STEPS: FollowupStepResponse[] = [
   {
@@ -849,7 +880,7 @@ export default function AnalyzerApp() {
         } else if (fallbackLocalBaselineLinks.length > 0) {
           setBaselineLinks(fallbackLocalBaselineLinks);
         } else if (loadedBaselineLinks !== null) {
-          setBaselineLinks([]);
+          setBaselineLinks(DEFAULT_BASELINE_LINKS);
         }
       } catch {
         // Keep in-memory defaults when backend state is unavailable.
@@ -1905,8 +1936,8 @@ export default function AnalyzerApp() {
             .map((item) => ({ url: item.url.trim(), note: item.note.trim() }))
             .filter((item) => Boolean(item.url)),
           include_confluence: true,
-          crawl_depth: 1,
-          max_pages: 80,
+          crawl_depth: 2,
+          max_pages: 220,
         });
       } catch (startErr) {
         const message = startErr instanceof Error ? startErr.message : "";
