@@ -434,10 +434,7 @@ const getProjectsFromResult = (item: GapResult) => {
   const projects = new Set<string>();
   for (const chunk of item.top_chunks || []) {
     const meta = chunk.metadata || {};
-    const project =
-      (typeof meta.project === "string" && meta.project) ||
-      (typeof meta.space_key === "string" && meta.space_key) ||
-      "";
+    const project = typeof meta.project === "string" ? meta.project : "";
     if (project.trim()) projects.add(project.trim());
   }
   return Array.from(projects);
@@ -600,6 +597,44 @@ export default function AnalyzerApp() {
     () => fsdSelectionsByThread[activeThreadId] || [],
     [fsdSelectionsByThread, activeThreadId]
   );
+  const selectedGapResults = useMemo(() => {
+    if (!activeThread) return [] as GapResult[];
+    const deduped = new Map<string, GapResult>();
+    const messageById = new Map(activeThread.messages.map((message) => [message.id, message]));
+
+    for (const item of activeFsdSelections) {
+      const sourceMessage = messageById.get(item.messageId);
+      const fromAnalysis = sourceMessage?.analysisResults || [];
+      if (fromAnalysis.length) {
+        for (const result of fromAnalysis) {
+          const key = normalizeForMatch(result.requirement || `${item.messageId}-${result.classification}`);
+          if (!deduped.has(key)) deduped.set(key, result);
+        }
+        continue;
+      }
+
+      const requirementParts = [item.requirementText.trim()];
+      if (item.finalSummary.trim()) requirementParts.push(item.finalSummary.trim());
+      for (const clarification of item.clarifications) {
+        if (!clarification.question.trim() || !clarification.answer.trim()) continue;
+        requirementParts.push(`${clarification.question.trim()}: ${clarification.answer.trim()}`);
+      }
+      const requirement = requirementParts.filter(Boolean).join("\n");
+      const fallbackClassification = item.classifications[0] || "Open Question";
+      const key = normalizeForMatch(requirement || item.id);
+      if (!deduped.has(key)) {
+        deduped.set(key, {
+          requirement: requirement || "Requirement captured from discussion",
+          classification: fallbackClassification,
+          confidence: 0.5,
+          rationale: item.response || "Generated from selected FSD point.",
+          top_chunks: [],
+          gaps: null,
+        });
+      }
+    }
+    return Array.from(deduped.values());
+  }, [activeFsdSelections, activeThread]);
   const activeAddedMessageIds = useMemo(
     () => new Set(addedMessageIdsByThread[activeThreadId] || []),
     [addedMessageIdsByThread, activeThreadId]
@@ -1625,9 +1660,14 @@ export default function AnalyzerApp() {
       URL.revokeObjectURL(url);
       setActionNotice("FSD .docx downloaded.");
     } catch (err) {
-      if (err instanceof Error && err.message === "FSD_TEXT_EXPORT_NOT_FOUND" && latestAnalysisResults.length) {
+      if (
+        err instanceof Error &&
+        err.message === "FSD_TEXT_EXPORT_NOT_FOUND" &&
+        (selectedGapResults.length || latestAnalysisResults.length)
+      ) {
         try {
-          const legacyBlob = await generateFsdDocx(latestAnalysisResults);
+          const fallbackResults = selectedGapResults.length ? selectedGapResults : latestAnalysisResults;
+          const legacyBlob = await generateFsdDocx(fallbackResults);
           const url = URL.createObjectURL(legacyBlob);
           const link = document.createElement("a");
           link.href = url;
@@ -1650,8 +1690,8 @@ export default function AnalyzerApp() {
   };
 
   const handleOpenFsdPreview = async () => {
-    if (!latestAnalysisResults.length) {
-      setError("Analyze scope in chat before previewing FSD.");
+    if (!selectedGapResults.length) {
+      setError("Add at least one finalized point to FSD before previewing.");
       return;
     }
 
@@ -1659,7 +1699,7 @@ export default function AnalyzerApp() {
     setError("");
     setActionNotice("");
     try {
-      const payload = await generateFsd(latestAnalysisResults);
+      const payload = await generateFsd(selectedGapResults);
       const nextPreview = payload.fsd || "";
       setFsdPreview(nextPreview);
       setFsdPreviewDraft(nextPreview);
@@ -1759,8 +1799,13 @@ export default function AnalyzerApp() {
         setActionNotice(`Saved to Confluence: ${saved.title}`);
         setIsConfluenceModalOpen(false);
       } catch (err) {
-        if (err instanceof Error && err.message === "FSD_TEXT_SAVE_NOT_FOUND" && latestAnalysisResults.length) {
-          const saved = await saveFsdToConfluence(latestAnalysisResults, spaceKey, parentId, title);
+        if (
+          err instanceof Error &&
+          err.message === "FSD_TEXT_SAVE_NOT_FOUND" &&
+          (selectedGapResults.length || latestAnalysisResults.length)
+        ) {
+          const fallbackResults = selectedGapResults.length ? selectedGapResults : latestAnalysisResults;
+          const saved = await saveFsdToConfluence(fallbackResults, spaceKey, parentId, title);
           setActionNotice(`Saved to Confluence: ${saved.title} (edited preview not supported by current backend).`);
           setIsConfluenceModalOpen(false);
           return;
@@ -1870,10 +1915,10 @@ export default function AnalyzerApp() {
         const webIndexed = status.web_pages_indexed || 0;
         const webSkipped = status.web_pages_skipped || 0;
         setDataSourceNotice(
-          `Ingestion completed: Confluence ${status.pages_indexed}/${status.pages_total} indexed (${status.pages_skipped} skipped), Web ${webIndexed} indexed (${webSkipped} skipped), ${status.chunks} chunks stored.`
+          `Ingestion completed: Confluence ${status.pages_processed}/${status.pages_total} processed (${status.pages_indexed} indexed, ${status.pages_skipped} skipped), Web ${webIndexed} indexed (${webSkipped} skipped), ${status.chunks} chunks stored.`
         );
         setActionNotice(
-          `Data ingestion completed: Confluence ${status.pages_indexed}/${status.pages_total}, Web ${webIndexed}, ${status.chunks} chunks.`
+          `Data ingestion completed: Confluence ${status.pages_processed}/${status.pages_total} processed (${status.pages_indexed} indexed), Web ${webIndexed}, ${status.chunks} chunks.`
         );
         setIsIngestingDataSources(false);
       };
@@ -3251,7 +3296,7 @@ export default function AnalyzerApp() {
           <div className="summary-export">
             <button
               onClick={() => void handleOpenFsdPreview()}
-              disabled={fsdPreviewLoading || !latestAnalysisResults.length}
+              disabled={fsdPreviewLoading || !selectedGapResults.length}
               className="fsd-sidebar-action-btn inline-flex w-full items-center justify-center gap-2 rounded-full bg-steel text-[0.84rem] font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
             >
               {fsdPreviewLoading ? (

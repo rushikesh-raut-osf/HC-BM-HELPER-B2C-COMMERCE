@@ -57,7 +57,7 @@ def search_pages(space_keys: Iterable[str], cql_extra: str = "") -> list[str]:
     if not keys:
         return []
 
-    cql_parts = [f"space in ({','.join(keys)})"]
+    cql_parts = [f"space in ({','.join(keys)})", "type=page"]
     if cql_extra:
         cql_parts.append(cql_extra)
     cql = " AND ".join(cql_parts)

@@ -32,6 +32,19 @@ _CANONICAL_SYNONYMS: dict[str, tuple[str, ...]] = {
         "you may also like",
         "related products",
     ),
+    "product badges": (
+        "product label",
+        "product labels",
+        "badge on product tile",
+        "pdp badge",
+        "plp badge",
+        "sale badge",
+    ),
+    "product tile": (
+        "product card",
+        "plp card",
+        "product grid item",
+    ),
     "promotions and coupons": (
         "discount code",
         "promo code",
@@ -75,12 +88,15 @@ def expand_requirement_query(text: str) -> str:
     lowered = raw.lower()
     expansions: list[str] = []
     for canonical, aliases in _CANONICAL_SYNONYMS.items():
-        if _contains_phrase(lowered, canonical):
+        has_canonical = _contains_phrase(lowered, canonical)
+        has_alias = any(_contains_phrase(lowered, alias) for alias in aliases)
+        if has_canonical:
+            # Add known variants to improve recall when project docs use alternate wording.
+            expansions.extend(aliases[:3])
             continue
-        if any(_contains_phrase(lowered, alias) for alias in aliases):
+        if has_alias:
             expansions.append(canonical)
 
     if not expansions:
         return raw
     return f"{raw}\n\nSFRA capability terms: {', '.join(sorted(set(expansions)))}"
-

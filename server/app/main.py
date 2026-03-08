@@ -378,7 +378,7 @@ def _run_confluence_ingest(progress_cb=None) -> dict:
         if progress_cb:
             page_progress = int((idx / total_pages) * 88)
             progress_cb(
-                stage=f"Indexed {idx}/{total_pages} pages...",
+                stage=f"Processed {idx}/{total_pages} pages (indexed {indexed_pages}, skipped {skipped_pages})...",
                 progress=min(98, 10 + page_progress),
                 pages_total=total_pages,
                 pages_processed=idx,

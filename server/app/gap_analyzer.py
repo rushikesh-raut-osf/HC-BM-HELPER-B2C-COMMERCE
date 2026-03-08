@@ -225,12 +225,23 @@ def _is_recent_project_doc(chunk: dict, max_age_days: int = 720) -> bool:
     return age_days <= max_age_days
 
 
+def _project_chunk_text(chunk: dict) -> str:
+    meta = chunk.get("metadata") or {}
+    return " ".join(
+        [
+            str(meta.get("title") or ""),
+            str(meta.get("source_id") or ""),
+            str(chunk.get("text") or ""),
+        ]
+    )
+
+
 def _project_reliability_gate(requirement: str, project_chunks: list[dict]) -> tuple[bool, Optional[dict]]:
     if not project_chunks:
         return False, None
     best = project_chunks[0]
     best_score = float(best.get("score") or 0.0)
-    overlap = _lexical_overlap(requirement, best.get("text") or "")
+    overlap = _lexical_overlap(requirement, _project_chunk_text(best))
     trusted = _is_project_doc_trusted(best)
     recent = _is_recent_project_doc(best)
     reliable = best_score >= 0.72 and overlap >= 0.18 and trusted and recent
@@ -240,7 +251,7 @@ def _project_reliability_gate(requirement: str, project_chunks: list[dict]) -> t
 def _detect_project_match_status(requirement: str, reliable: bool, project_chunks: list[dict]) -> str:
     if not project_chunks:
         return "not_implemented"
-    best_overlap = max(_lexical_overlap(requirement, chunk.get("text") or "") for chunk in project_chunks[:6])
+    best_overlap = max(_lexical_overlap(requirement, _project_chunk_text(chunk)) for chunk in project_chunks[:6])
     if reliable and best_overlap >= 0.48:
         return "already_implemented"
     if best_overlap >= 0.2:
