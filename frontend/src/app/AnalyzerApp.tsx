@@ -799,6 +799,18 @@ export default function AnalyzerApp() {
             };
           })
           .filter((thread) => !!thread.id);
+        const loadedBaselineLinks: DataSourceLink[] = Array.isArray(payload.baseline_links)
+          ? payload.baseline_links
+              .map((item) => ({
+                id:
+                  typeof item?.id === "string" && item.id.trim()
+                    ? item.id.trim()
+                    : crypto.randomUUID(),
+                url: typeof item?.url === "string" ? item.url.trim() : "",
+                note: typeof item?.note === "string" ? item.note.trim() : "",
+              }))
+              .filter((item) => !!item.url)
+          : [];
 
         setProjects(
           loadedProjects.some((project) => project.toLowerCase() === DEFAULT_PROJECT_NAME.toLowerCase())
@@ -809,6 +821,7 @@ export default function AnalyzerApp() {
           setThreads(loadedThreads);
           setActiveThreadId(loadedThreads[0].id);
         }
+        setBaselineLinks(loadedBaselineLinks);
       } catch {
         // Keep in-memory defaults when backend state is unavailable.
       } finally {
@@ -837,6 +850,11 @@ export default function AnalyzerApp() {
           project_id: thread.projectTag || DEFAULT_PROJECT_NAME,
           messages: thread.messages as Array<Record<string, unknown>>,
         })),
+        baseline_links: baselineLinks.map((item) => ({
+          id: item.id,
+          url: item.url.trim(),
+          note: item.note.trim(),
+        })).filter((item) => !!item.url),
       }, sessionEmail).catch(() => {
         // Keep UX non-blocking if persistence fails.
       });
@@ -847,7 +865,7 @@ export default function AnalyzerApp() {
         window.clearTimeout(workspaceSyncTimerRef.current);
       }
     };
-  }, [projects, threads, workspaceLoaded, sessionEmail]);
+  }, [projects, threads, baselineLinks, workspaceLoaded, sessionEmail]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

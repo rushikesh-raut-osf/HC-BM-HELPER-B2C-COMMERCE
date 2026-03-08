@@ -205,6 +205,13 @@ class WorkspaceThread(BaseModel):
     messages: list[dict] = Field(default_factory=list)
 
 
+class WorkspaceDataSourceLink(BaseModel):
+    id: Optional[str] = None
+    url: str
+    note: Optional[str] = None
+
+
 class WorkspaceStatePayload(BaseModel):
     projects: list[str] = Field(default_factory=list)
     threads: list[WorkspaceThread] = Field(default_factory=list)
+    baseline_links: list[WorkspaceDataSourceLink] = Field(default_factory=list)

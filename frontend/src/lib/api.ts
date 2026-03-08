@@ -75,9 +75,16 @@ export type WorkspaceThread = {
   messages: Array<Record<string, unknown>>;
 };
 
+export type WorkspaceDataSourceLink = {
+  id?: string | null;
+  url: string;
+  note?: string | null;
+};
+
 export type WorkspaceStatePayload = {
   projects?: string[];
   threads: WorkspaceThread[];
+  baseline_links?: WorkspaceDataSourceLink[];
 };
 
 export async function analyzeRequirementsText(text: string, baselineName?: string) {

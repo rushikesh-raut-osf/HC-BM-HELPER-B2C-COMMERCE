@@ -47,21 +47,41 @@ def load_workspace_state(user_email: str) -> dict[str, Any]:
             (normalized_email,),
         ).fetchone()
         if not row:
-            return {"projects": [], "threads": []}
+            return {"projects": [], "threads": [], "baseline_links": []}
         try:
             payload = json.loads(str(row["payload_json"]))
         except Exception:
-            return {"projects": [], "threads": []}
+            return {"projects": [], "threads": [], "baseline_links": []}
     if not isinstance(payload, dict):
-        return {"projects": [], "threads": []}
+        return {"projects": [], "threads": [], "baseline_links": []}
     projects = payload.get("projects")
     if not isinstance(projects, list):
         projects = []
     projects = [str(item).strip() for item in projects if isinstance(item, str) and str(item).strip()]
     threads = payload.get("threads")
+    raw_baseline_links = payload.get("baseline_links")
+    baseline_links: list[dict[str, str]] = []
+    if isinstance(raw_baseline_links, list):
+        for item in raw_baseline_links:
+            if not isinstance(item, dict):
+                continue
+            raw_url = item.get("url")
+            if not isinstance(raw_url, str):
+                continue
+            url = raw_url.strip()
+            if not url:
+                continue
+            raw_id = item.get("id")
+            raw_note = item.get("note")
+            normalized_item = {
+                "id": str(raw_id).strip() if isinstance(raw_id, str) and str(raw_id).strip() else "",
+                "url": url,
+                "note": str(raw_note).strip() if isinstance(raw_note, str) and str(raw_note).strip() else "",
+            }
+            baseline_links.append(normalized_item)
     if not isinstance(threads, list):
-        return {"projects": projects, "threads": []}
-    return {"projects": projects, "threads": threads}
+        return {"projects": projects, "threads": [], "baseline_links": baseline_links}
+    return {"projects": projects, "threads": threads, "baseline_links": baseline_links}
 
 
 def save_workspace_state(user_email: str, state: dict[str, Any], updated_at: str) -> dict[str, Any]:
@@ -81,7 +101,27 @@ def save_workspace_state(user_email: str, state: dict[str, Any], updated_at: str
                 continue
             seen.add(key)
             projects.append(cleaned)
-    payload = {"projects": projects, "threads": state.get("threads", [])}
+    raw_baseline_links = state.get("baseline_links", [])
+    baseline_links: list[dict[str, str]] = []
+    if isinstance(raw_baseline_links, list):
+        for item in raw_baseline_links:
+            if not isinstance(item, dict):
+                continue
+            raw_url = item.get("url")
+            if not isinstance(raw_url, str):
+                continue
+            url = raw_url.strip()
+            if not url:
+                continue
+            raw_id = item.get("id")
+            raw_note = item.get("note")
+            normalized_item = {
+                "id": str(raw_id).strip() if isinstance(raw_id, str) and str(raw_id).strip() else "",
+                "url": url,
+                "note": str(raw_note).strip() if isinstance(raw_note, str) and str(raw_note).strip() else "",
+            }
+            baseline_links.append(normalized_item)
+    payload = {"projects": projects, "threads": state.get("threads", []), "baseline_links": baseline_links}
     serialized = json.dumps(payload, ensure_ascii=True)
     init_workspace_db()
     with _connect() as conn:
