@@ -11,6 +11,7 @@ import json
 import threading
 import time
 import uuid
+from datetime import datetime
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -70,7 +71,13 @@ from .schemas import (
     WorkspaceStatePayload,
 )
 from .baseline_store import compare_to_baseline, load_baseline, save_baseline
-from .thread_store import init_workspace_db, load_workspace_state, save_workspace_state
+from .thread_store import (
+    init_workspace_db,
+    load_global_baseline_links,
+    load_workspace_state,
+    save_global_baseline_links,
+    save_workspace_state,
+)
 
 
 app = FastAPI(title="SFRA AI Agent API", version="0.2.0")
@@ -470,12 +477,16 @@ def _run_web_sources_ingest(links: list[dict], crawl_depth: int, max_pages: int,
     if not queue:
         return {"processed": 0, "indexed": 0, "skipped": 0, "chunks": 0}
 
+    existing_source_ids = chroma.list_source_ids("baseline_web")
+    current_source_ids: set[str] = set()
+
     with httpx.Client(timeout=20.0, headers={"User-Agent": "Scout-Ingest/1.0"}) as client:
         while queue and processed_pages < max_pages:
             url, depth, seed_url, note = queue.pop(0)
             if url in seen:
                 continue
             seen.add(url)
+            current_source_ids.add(url)
 
             try:
                 response = client.get(url)
@@ -532,6 +543,10 @@ def _run_web_sources_ingest(links: list[dict], crawl_depth: int, max_pages: int,
                     web_pages_skipped=skipped_pages,
                     stage=f"Indexed baseline web sources: {processed_pages} pages processed...",
                 )
+
+    stale_source_ids = sorted(existing_source_ids - current_source_ids)
+    for stale_source_id in stale_source_ids:
+        chroma.delete_source("baseline_web", stale_source_id)
 
     return {
         "processed": processed_pages,
@@ -629,6 +644,10 @@ def workspace_state_get(x_user_email: str | None = Header(default=None)):
     if not user_email:
         raise HTTPException(status_code=400, detail="x-user-email header is required")
     state = load_workspace_state(user_email)
+    global_baseline_links = load_global_baseline_links()
+    if not global_baseline_links and state.get("baseline_links"):
+        global_baseline_links = save_global_baseline_links(state.get("baseline_links", []), datetime.utcnow().isoformat())
+    state["baseline_links"] = global_baseline_links
     return WorkspaceStatePayload(**state)
 
 
@@ -640,7 +659,14 @@ def workspace_state_save(payload: WorkspaceStatePayload, x_user_email: str | Non
     latest = "1970-01-01T00:00:00.000Z"
     if payload.threads:
         latest = max((item.updated_at for item in payload.threads), default=latest)
-    saved = save_workspace_state(user_email, payload.model_dump(), latest)
+    state_payload = payload.model_dump()
+    baseline_links = state_payload.pop("baseline_links", [])
+    saved = save_workspace_state(user_email, state_payload, latest)
+    if "baseline_links" in payload.model_fields_set:
+        shared_baseline_links = save_global_baseline_links(baseline_links, latest)
+    else:
+        shared_baseline_links = load_global_baseline_links()
+    saved["baseline_links"] = shared_baseline_links
     return WorkspaceStatePayload(**saved)
 
 

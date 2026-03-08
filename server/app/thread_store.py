@@ -32,6 +32,15 @@ def init_workspace_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_state_global (
+                key TEXT PRIMARY KEY,
+                payload_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def _normalize_user_email(user_email: str) -> str:
@@ -136,3 +145,79 @@ def save_workspace_state(user_email: str, state: dict[str, Any], updated_at: str
             (normalized_email, serialized, updated_at),
         )
     return payload
+
+
+def load_global_baseline_links() -> list[dict[str, str]]:
+    init_workspace_db()
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT payload_json FROM workspace_state_global WHERE key = ?",
+            ("baseline_links",),
+        ).fetchone()
+        if not row:
+            return []
+        try:
+            payload = json.loads(str(row["payload_json"]))
+        except Exception:
+            return []
+    if not isinstance(payload, list):
+        return []
+
+    baseline_links: list[dict[str, str]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        raw_url = item.get("url")
+        if not isinstance(raw_url, str):
+            continue
+        url = raw_url.strip()
+        if not url:
+            continue
+        raw_id = item.get("id")
+        raw_note = item.get("note")
+        baseline_links.append(
+            {
+                "id": str(raw_id).strip() if isinstance(raw_id, str) and str(raw_id).strip() else "",
+                "url": url,
+                "note": str(raw_note).strip() if isinstance(raw_note, str) and str(raw_note).strip() else "",
+            }
+        )
+    return baseline_links
+
+
+def save_global_baseline_links(links: list[dict[str, Any]], updated_at: str) -> list[dict[str, str]]:
+    normalized_links: list[dict[str, str]] = []
+    if isinstance(links, list):
+        for item in links:
+            if not isinstance(item, dict):
+                continue
+            raw_url = item.get("url")
+            if not isinstance(raw_url, str):
+                continue
+            url = raw_url.strip()
+            if not url:
+                continue
+            raw_id = item.get("id")
+            raw_note = item.get("note")
+            normalized_links.append(
+                {
+                    "id": str(raw_id).strip() if isinstance(raw_id, str) and str(raw_id).strip() else "",
+                    "url": url,
+                    "note": str(raw_note).strip() if isinstance(raw_note, str) and str(raw_note).strip() else "",
+                }
+            )
+
+    serialized = json.dumps(normalized_links, ensure_ascii=True)
+    init_workspace_db()
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO workspace_state_global (key, payload_json, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            ("baseline_links", serialized, updated_at),
+        )
+    return normalized_links

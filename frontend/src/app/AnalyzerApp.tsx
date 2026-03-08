@@ -799,7 +799,7 @@ export default function AnalyzerApp() {
             };
           })
           .filter((thread) => !!thread.id);
-        const loadedBaselineLinks: DataSourceLink[] = Array.isArray(payload.baseline_links)
+        const loadedBaselineLinks: DataSourceLink[] | null = Array.isArray(payload.baseline_links)
           ? payload.baseline_links
               .map((item) => ({
                 id:
@@ -810,7 +810,30 @@ export default function AnalyzerApp() {
                 note: typeof item?.note === "string" ? item.note.trim() : "",
               }))
               .filter((item) => !!item.url)
-          : [];
+          : null;
+        let fallbackLocalBaselineLinks: DataSourceLink[] = [];
+        if (loadedBaselineLinks !== null && loadedBaselineLinks.length === 0) {
+          try {
+            const raw = localStorage.getItem(DATA_SOURCE_STORAGE_KEY);
+            if (raw) {
+              const parsed = JSON.parse(raw) as { baselineLinks?: DataSourceLink[] };
+              if (Array.isArray(parsed.baselineLinks)) {
+                fallbackLocalBaselineLinks = parsed.baselineLinks
+                  .map((item) => ({
+                    id:
+                      typeof item?.id === "string" && item.id.trim()
+                        ? item.id.trim()
+                        : crypto.randomUUID(),
+                    url: typeof item?.url === "string" ? item.url.trim() : "",
+                    note: typeof item?.note === "string" ? item.note.trim() : "",
+                  }))
+                  .filter((item) => !!item.url);
+              }
+            }
+          } catch {
+            fallbackLocalBaselineLinks = [];
+          }
+        }
 
         setProjects(
           loadedProjects.some((project) => project.toLowerCase() === DEFAULT_PROJECT_NAME.toLowerCase())
@@ -821,7 +844,13 @@ export default function AnalyzerApp() {
           setThreads(loadedThreads);
           setActiveThreadId(loadedThreads[0].id);
         }
-        setBaselineLinks(loadedBaselineLinks);
+        if (loadedBaselineLinks && loadedBaselineLinks.length > 0) {
+          setBaselineLinks(loadedBaselineLinks);
+        } else if (fallbackLocalBaselineLinks.length > 0) {
+          setBaselineLinks(fallbackLocalBaselineLinks);
+        } else if (loadedBaselineLinks !== null) {
+          setBaselineLinks([]);
+        }
       } catch {
         // Keep in-memory defaults when backend state is unavailable.
       } finally {
